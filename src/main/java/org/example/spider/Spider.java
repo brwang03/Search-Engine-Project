@@ -104,7 +104,7 @@ public class Spider {
                 break;
             }
         }
-        String storageDir = "crawled_pages";
+        String storageDir = "src/main/resources";
         try {
             indexManager.exportLinkStructure("link_structure.txt");
             System.out.println("\nCrawling completed!");
@@ -128,7 +128,7 @@ public class Spider {
     public static void main(String[] args) {
         String startUrl = "https://www.cse.ust.hk/~kwtleung/COMP4321/testpage.htm";
         int maxPages = 300;
-        String storageDir = "crawled_pages";
+        String storageDir = "src/main/resources/html_pages";
 
         Spider spider = new Spider(startUrl, maxPages, storageDir);
         spider.crawl();
