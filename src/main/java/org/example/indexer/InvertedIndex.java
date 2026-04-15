@@ -135,6 +135,10 @@ public class InvertedIndex
 		hTree.put(term, postingList);
 	}
 
+	public HTree getHTree() {
+		return hTree;
+	}
+
 	public void delEntry(String word) throws IOException
 	{
 		hTree.remove(word);
