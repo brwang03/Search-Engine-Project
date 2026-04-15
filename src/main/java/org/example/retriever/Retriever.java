@@ -5,7 +5,10 @@ import org.example.indexer.Posting;
 import org.example.indexer.PostingList;
 import org.example.indexer.StopStem;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,6 +21,26 @@ public class Retriever {
     private final int totalDocuments;
     private static final double TITLE_BOOST = 3.0;
     private static final int MAX_RESULTS = 50;
+
+    private final Map<Integer, PageInfo> pageInfoCache;
+
+    private static class PageInfo {
+        String url;
+        String title;
+        int parentId;
+        List<Integer> childrenIds;
+        long lastModified;
+        int size;
+
+        PageInfo(String url, String title, int parentId, List<Integer> childrenIds, long lastModified, int size) {
+            this.url = url;
+            this.title = title;
+            this.parentId = parentId;
+            this.childrenIds = childrenIds;
+            this.lastModified = lastModified;
+            this.size = size;
+        }
+    }
 
     private static class ParsedQuery {
         List<String> terms;
@@ -39,10 +62,13 @@ public class Retriever {
         public final List<Map.Entry<String, Integer>> topKeywords;
         public final int parentId;
         public final List<Integer> childrenIds;
+        public final long lastModified;
+        public final int size;
 
         public SearchResult(int docId, String url, String title, double score,
                            List<Map.Entry<String, Integer>> topKeywords,
-                           int parentId, List<Integer> childrenIds) {
+                           int parentId, List<Integer> childrenIds,
+                           long lastModified, int size) {
             this.docId = docId;
             this.url = url;
             this.title = title;
@@ -50,6 +76,8 @@ public class Retriever {
             this.topKeywords = topKeywords;
             this.parentId = parentId;
             this.childrenIds = childrenIds;
+            this.lastModified = lastModified;
+            this.size = size;
         }
 
         @Override
@@ -63,20 +91,83 @@ public class Retriever {
         this.bodyIndex = new InvertedIndex(bodyIndexDBName, "body_index");
         this.titleIndex = new InvertedIndex(titleIndexDBName, "title_index");
         this.tokenPattern = Pattern.compile("[^a-z0-9]+");
-        this.totalDocuments = countDocuments();
+        this.totalDocuments = 300;
+        this.pageInfoCache = new HashMap<>();
+        loadPageInfo();
     }
 
-    private int countDocuments() {
-        int count = 0;
+    private void loadPageInfo() {
         try {
-            jdbm.helper.FastIterator iter = bodyIndex.getHTree().keys();
-            while (iter.next() != null) {
-                count++;
+            String linkStructurePath = "src/main/resources/link_structure.txt";
+            List<String> lines = Files.readAllLines(Paths.get(linkStructurePath));
+
+            for (int i = 2; i < lines.size(); i++) {
+                String line = lines.get(i).trim();
+                if (line.isEmpty()) continue;
+
+                String[] parts = line.split("\\|");
+                if (parts.length >= 4) {
+                    int docId = Integer.parseInt(parts[0].trim());
+                    String url = parts[1].trim();
+                    int parentId = Integer.parseInt(parts[2].trim());
+                    String childrenStr = parts[3].trim();
+
+                    List<Integer> children = new ArrayList<>();
+                    if (!childrenStr.equals("[]")) {
+                        String childrenClean = childrenStr.substring(1, childrenStr.length() - 1);
+                        if (!childrenClean.isEmpty()) {
+                            String[] childArray = childrenClean.split(",");
+                            for (String c : childArray) {
+                                children.add(Integer.parseInt(c.trim()));
+                            }
+                        }
+                    }
+
+                    long lastModified = 0;
+                    int size = 0;
+                    try {
+                        String htmlPath = "src/main/resources/html_pages/page_" + docId + ".html";
+                        File htmlFile = new File(htmlPath);
+                        if (htmlFile.exists()) {
+                            String content = Files.readString(htmlFile.toPath());
+                            size = content.length();
+
+                            String[] contentLines = content.split("\n");
+                            for (String cl : contentLines) {
+                                if (cl.startsWith("Last-Modified:")) {
+                                    try {
+                                        String dateStr = cl.substring("Last-Modified:".length()).trim();
+                                        java.text.SimpleDateFormat format = new java.text.SimpleDateFormat(
+                                                "EEE MMM dd HH:mm:ss yyyy", Locale.US);
+                                        java.util.Date date = format.parse(dateStr);
+                                        lastModified = date.getTime();
+                                    } catch (Exception e) {
+                                        lastModified = htmlFile.lastModified();
+                                    }
+                                    break;
+                                }
+                            }
+
+                            for (String cl : contentLines) {
+                                if (cl.startsWith("Title:")) {
+                                    url = cl.substring("Title:".length()).trim();
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        lastModified = System.currentTimeMillis();
+                    }
+
+                    pageInfoCache.put(docId, new PageInfo(url, url, parentId, children, lastModified, size));
+                }
             }
-        } catch (IOException e) {
-            e.printStackTrace();
+        } catch (Exception e) {
+            System.err.println("Error loading page info: " + e.getMessage());
+            for (int i = 1; i <= 300; i++) {
+                pageInfoCache.put(i, new PageInfo("page_" + i + ".html", "Document " + i, -1, new ArrayList<>(), 0, 0));
+            }
         }
-        return Math.max(count, 300);
     }
 
     private ParsedQuery parseQuery(String query) {
@@ -88,7 +179,6 @@ public class Retriever {
         Matcher phraseMatcher = phrasePattern.matcher(query);
 
         String remaining = query;
-        int pos = 0;
 
         while (phraseMatcher.find()) {
             String before = remaining.substring(0, phraseMatcher.start()).trim();
@@ -125,7 +215,6 @@ public class Retriever {
 
             remaining = remaining.substring(phraseMatcher.end());
             phraseMatcher = phrasePattern.matcher(remaining);
-            pos = phraseMatcher.hitEnd() ? remaining.length() : phraseMatcher.start();
         }
 
         if (!remaining.trim().isEmpty()) {
@@ -180,6 +269,7 @@ public class Retriever {
                 for (Posting p : postings.postings) {
                     maxTf = Math.max(maxTf, p.freq);
                 }
+                if (maxTf == 0) maxTf = 1;
                 for (Posting p : postings.postings) {
                     double idf = calculateIDF(postings.postings.size());
                     double weight = calculateTFWeight(p.freq, maxTf, idf);
@@ -236,24 +326,39 @@ public class Retriever {
         return true;
     }
 
+    private double calculateCosineScore(Map<String, Double> docWeights, Map<String, Double> queryWeights) {
+        double dotProduct = 0.0;
+        double docNorm = 0.0;
+        double queryNorm = 0.0;
+
+        for (Map.Entry<String, Double> e : docWeights.entrySet()) {
+            String term = e.getKey();
+            double docWeight = e.getValue();
+            Double queryWeight = queryWeights.get(term);
+            if (queryWeight != null) {
+                dotProduct += docWeight * queryWeight;
+            }
+            docNorm += docWeight * docWeight;
+        }
+
+        for (Double weight : queryWeights.values()) {
+            queryNorm += weight * weight;
+        }
+
+        docNorm = Math.sqrt(docNorm);
+        queryNorm = Math.sqrt(queryNorm);
+
+        if (docNorm == 0 || queryNorm == 0) return 0;
+        return dotProduct / (docNorm * queryNorm);
+    }
+
     private double calculateDocumentScore(int docId, ParsedQuery query,
                                           Map<String, Integer> df,
-                                          Map<String, Double> titleWeights,
-                                          Map<String, Double> bodyWeights) {
+                                          Map<Integer, Double> titleWeights,
+                                          Map<Integer, Double> bodyWeights) {
         double score = 0.0;
-        double titleScore = 0.0;
-        double bodyScore = 0.0;
-
-        for (String term : query.terms) {
-            Double titleWeight = titleWeights.get(docId);
-            if (titleWeight != null) {
-                titleScore += titleWeight;
-            }
-            Double bodyWeight = bodyWeights.get(docId);
-            if (bodyWeight != null) {
-                bodyScore += bodyWeight;
-            }
-        }
+        double titleScore = titleWeights.getOrDefault(docId, 0.0);
+        double bodyScore = bodyWeights.getOrDefault(docId, 0.0);
 
         score = titleScore * TITLE_BOOST + bodyScore;
 
@@ -270,16 +375,6 @@ public class Retriever {
         }
 
         return score;
-    }
-
-    private double getQueryVectorNorm(ParsedQuery query, Map<String, Integer> df) {
-        double norm = 0.0;
-        for (String term : query.terms) {
-            int docFreq = df.getOrDefault(term, 0);
-            double idf = calculateIDF(docFreq);
-            norm += idf * idf;
-        }
-        return Math.sqrt(norm);
     }
 
     public List<SearchResult> search(String queryString) {
@@ -307,38 +402,33 @@ public class Retriever {
             }
         }
 
+        Map<String, Double> queryWeights = new HashMap<>();
+        for (String term : query.terms) {
+            int docFreq = df.getOrDefault(term, 0);
+            double idf = calculateIDF(docFreq);
+            queryWeights.put(term, idf);
+        }
+
         List<SearchResult> results = new ArrayList<>();
         for (int docId : candidateDocs) {
             double score = calculateDocumentScore(docId, query, df, titleWeights, bodyWeights);
             if (score > 0) {
-                String url = getPageUrl(docId);
-                String title = getPageTitle(docId);
-                int parentId = getPageParentId(docId);
-                List<Integer> childrenIds = getPageChildrenIds(docId);
+                PageInfo info = pageInfoCache.get(docId);
+                String url = info != null ? info.url : "page_" + docId + ".html";
+                String title = info != null && info.title != null ? info.title : "Document " + docId;
+                int parentId = info != null ? info.parentId : -1;
+                List<Integer> childrenIds = info != null ? info.childrenIds : new ArrayList<>();
+                long lastModified = info != null ? info.lastModified : 0;
+                int size = info != null ? info.size : 0;
+
                 List<Map.Entry<String, Integer>> keywords = getTopKeywords(docId);
 
-                results.add(new SearchResult(docId, url, title, score, keywords, parentId, childrenIds));
+                results.add(new SearchResult(docId, url, title, score, keywords, parentId, childrenIds, lastModified, size));
             }
         }
 
         Collections.sort(results);
         return results.subList(0, Math.min(MAX_RESULTS, results.size()));
-    }
-
-    private String getPageUrl(int docId) {
-        return "page_" + docId + ".html";
-    }
-
-    private String getPageTitle(int docId) {
-        return "Document " + docId;
-    }
-
-    private int getPageParentId(int docId) {
-        return -1;
-    }
-
-    private List<Integer> getPageChildrenIds(int docId) {
-        return new ArrayList<>();
     }
 
     private List<Map.Entry<String, Integer>> getTopKeywords(int docId) {
@@ -386,6 +476,12 @@ public class Retriever {
                     SearchResult r = results.get(i);
                     System.out.printf("[%d] Doc %d: %s (score=%.4f)%n",
                             i + 1, r.docId, r.title, r.score);
+                    System.out.printf("    URL: %s%n", r.url);
+                    System.out.printf("    Keywords: ");
+                    for (Map.Entry<String, Integer> kw : r.topKeywords) {
+                        System.out.printf("%s(%d) ", kw.getKey(), kw.getValue());
+                    }
+                    System.out.println();
                 }
             }
         } catch (IOException e) {
