@@ -6,86 +6,9 @@ import jdbm.htree.HTree;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-
-/**
- * Posting entry: stores document ID, frequency, and position list for phrase search support
- */
-class Posting implements Serializable
-{
-	public int docId;
-	public int freq;
-	public List<Integer> positions;
-	
-	Posting(int docId)
-	{
-		this.docId = docId;
-		this.freq = 0;
-		this.positions = new ArrayList<>();
-	}
-	
-	public void addPosition(int position)
-	{
-		positions.add(position);
-		freq = positions.size();
-	}
-	
-	public String toString()
-	{
-		return "doc" + docId + ": tf=" + freq + " pos=" + positions.toString();
-	}
-}
-
-/**
- * PostingList: A list of postings for a single term
- * Stored as a Serializable object directly in JDBM (no string parsing needed!)
- */
-class PostingList implements Serializable
-{
-	public List<Posting> postings;  // Sorted list of postings for a term
-	
-	PostingList()
-	{
-		this.postings = new ArrayList<>();
-	}
-	
-	/**
-	 * Add or update a posting for a given docId and position
-	 */
-	public void addPosting(int docId, int position)
-	{
-		// Find existing posting for this docId
-		for (Posting p : postings) {
-			if (p.docId == docId) {
-				p.addPosition(position);
-				return;
-			}
-		}
-		
-		// If not found, create new posting
-		Posting newPosting = new Posting(docId);
-		newPosting.addPosition(position);
-		postings.add(newPosting);
-	}
-	
-	@Override
-	public String toString()
-	{
-		StringBuilder sb = new StringBuilder();
-		for (int i = 0; i < postings.size(); i++) {
-			if (i > 0) {
-				sb.append(" | ");
-			}
-			sb.append(postings.get(i));
-		}
-		return sb.toString();
-	}
-}
 
 public class InvertedIndex
 {

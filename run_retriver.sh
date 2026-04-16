@@ -50,7 +50,7 @@ echo "Step 2: Resolving dependency classpath..."
 
 echo
 echo "Step 3: Running retriever..."
-"$JAVA_BIN" -cp "$PROJECT_DIR/target/classes:$(cat "$PROJECT_DIR/target/classpath.txt")" org.example.indexer.Retriever "$@"
+"$JAVA_BIN" -cp "$PROJECT_DIR/target/classes:$(cat "$PROJECT_DIR/target/classpath.txt")" org.example.retriever.Retriever "$@"
 
 echo
 echo "===================================="

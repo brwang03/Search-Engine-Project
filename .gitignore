@@ -8,7 +8,7 @@ target/
 .jdk/
 lib/
 
-# Local index backups
+# Generated / local data (do not commit)
 db_backup_*/
 db_rebuild_old/
 
