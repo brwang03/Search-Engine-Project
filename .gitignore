@@ -3,6 +3,15 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+# Local toolchains (do not commit)
+.maven/
+.jdk/
+lib/
+
+# Local index backups
+db_backup_*/
+db_rebuild_old/
+
 ### IntelliJ IDEA ###
 .idea/modules.xml
 .idea/jarRepositories.xml

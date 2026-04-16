@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -135,12 +136,40 @@ public class Indexer {
             return;
         }
 
-        int docId = 1;
         int successCount = 0;
         int errorCount = 0;
 
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.{html,htm}")) {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "page_*.html")) {
+            List<Path> paths = new ArrayList<>();
             for (Path path : stream) {
+                paths.add(path);
+            }
+            paths.sort(Comparator.comparingInt(p -> {
+                String name = p.getFileName().toString();
+                int underscore = name.indexOf('_');
+                int dot = name.lastIndexOf('.');
+                if (underscore >= 0 && dot > underscore) {
+                    try {
+                        return Integer.parseInt(name.substring(underscore + 1, dot));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                return Integer.MAX_VALUE;
+            }));
+
+            for (Path path : paths) {
+                String name = path.getFileName().toString();
+                int docId;
+                try {
+                    int underscore = name.indexOf('_');
+                    int dot = name.lastIndexOf('.');
+                    docId = Integer.parseInt(name.substring(underscore + 1, dot));
+                } catch (Exception e) {
+                    errorCount++;
+                    System.err.println("Skipping file with unexpected name: " + name);
+                    continue;
+                }
+
                 try {
                     processHtmlFile(path.toFile(), docId);
                     successCount++;
@@ -148,7 +177,6 @@ public class Indexer {
                     errorCount++;
                     System.err.println("Failed to process: " + path.getFileName());
                 }
-                docId++;
             }
         } catch (IOException e) {
             System.err.println("Error reading directory: " + e.getMessage());
