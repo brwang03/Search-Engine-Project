@@ -125,16 +125,23 @@ public class Retriever {
 
                     long lastModified = 0;
                     int size = 0;
+                    String title = "Document " + docId;
+
                     try {
                         String htmlPath = "src/main/resources/html_pages/page_" + docId + ".html";
                         File htmlFile = new File(htmlPath);
+
                         if (htmlFile.exists()) {
                             String content = Files.readString(htmlFile.toPath());
                             size = content.length();
+                            String[] contentLines = content.split("\\r?\\n");
 
-                            String[] contentLines = content.split("\n");
                             for (String cl : contentLines) {
-                                if (cl.startsWith("Last-Modified:")) {
+                                if (cl.startsWith("URL:")) {
+                                    url = cl.substring("URL:".length()).trim();
+                                } else if (cl.startsWith("Title:")) {
+                                    title = cl.substring("Title:".length()).trim();
+                                } else if (cl.startsWith("Last-Modified:")) {
                                     try {
                                         String dateStr = cl.substring("Last-Modified:".length()).trim();
                                         java.text.SimpleDateFormat format = new java.text.SimpleDateFormat(
@@ -144,22 +151,15 @@ public class Retriever {
                                     } catch (Exception e) {
                                         lastModified = htmlFile.lastModified();
                                     }
-                                    break;
-                                }
-                            }
-
-                            for (String cl : contentLines) {
-                                if (cl.startsWith("Title:")) {
-                                    url = cl.substring("Title:".length()).trim();
-                                    break;
                                 }
                             }
                         }
                     } catch (Exception e) {
+                        System.err.println("Warning: Failed to parse HTML metadata for doc " + docId);
                         lastModified = System.currentTimeMillis();
                     }
 
-                    pageInfoCache.put(docId, new PageInfo(url, url, parentId, children, lastModified, size));
+                    pageInfoCache.put(docId, new PageInfo(url, title, parentId, children, lastModified, size));
                 }
             }
         } catch (Exception e) {
@@ -454,6 +454,22 @@ public class Retriever {
         List<Map.Entry<String, Integer>> sorted = new ArrayList<>(termFreqs.entrySet());
         sorted.sort((a, b) -> b.getValue().compareTo(a.getValue()));
         return sorted.subList(0, Math.min(5, sorted.size()));
+    }
+
+    /**
+     * Get the actual URL of a document by ID
+     */
+    public String getPageUrl(int docId) {
+        PageInfo info = pageInfoCache.get(docId);
+        return (info != null && info.url != null) ? info.url : "page_" + docId + ".html";
+    }
+
+    /**
+     * Get the title of a document by ID
+     */
+    public String getPageTitle(int docId) {
+        PageInfo info = pageInfoCache.get(docId);
+        return (info != null && info.title != null) ? info.title : "Document " + docId;
     }
 
     private static void printResults(String query, List<SearchResult> results, int limit) {

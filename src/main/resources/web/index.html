@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSIT5930 Search Engine</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 { color: #333; margin-bottom: 20px; text-align: center; }
+        .search-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .search-box { display: flex; gap: 10px; }
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+        input[type="text"]:focus { outline: none; border-color: #4CAF50; }
+        button {
+            padding: 12px 24px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover { background-color: #45a049; }
+        button:disabled { background-color: #ccc; }
+        .hint { margin-top: 8px; color: #666; font-size: 14px; }
+        .results-info { margin-bottom: 10px; color: #666; }
+
+        .result-item {
+            background: white;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .score {
+            color: #4CAF50;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        .title { font-size: 18px; margin-bottom: 5px; }
+        .title a { color: #1a0dab; text-decoration: none; }
+        .title a:hover { text-decoration: underline; }
+        .url {
+            color: #006621;
+            font-size: 14px;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        .url a { color: #006621; text-decoration: none; }
+        .url a:hover { text-decoration: underline; }
+        .meta { color: #666; font-size: 13px; margin-bottom: 8px; }
+        .keywords {
+            color: #333;
+            font-size: 13px;
+            margin-bottom: 10px;
+            font-family: monospace;
+            background: #f9f9f9;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .links-section { margin-top: 10px; font-size: 13px; }
+        .links-label { color: #666; font-weight: bold; margin-bottom: 4px; }
+        .link-list { margin-left: 15px; }
+        .link-item { margin: 3px 0; }
+        .link-item a { color: #1a0dab; text-decoration: none; }
+        .link-item a:hover { text-decoration: underline; }
+        .no-results { text-align: center; color: #666; padding: 40px; }
+        .error {
+            color: #d32f2f;
+            background: #ffebee;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        #loading { text-align: center; padding: 40px; color: #666; }
+    </style>
+</head>
+<body>
+<h1>CSIT5930 Web Search Engine</h1>
+
+<div class="search-container">
+    <div class="search-box">
+        <input type="text" id="queryInput" placeholder='Enter search query (e.g., "hong kong" universities)' />
+        <button onclick="performSearch()" id="searchBtn">Search</button>
+    </div>
+    <div class="hint">
+        Tip: Use double quotes for phrase search (e.g., "hong kong"). Max 50 results displayed.
+    </div>
+</div>
+
+<div id="results"></div>
+
+<script>
+    const API_BASE = 'http://localhost:8080';
+
+    document.getElementById('queryInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') performSearch();
+    });
+
+    async function performSearch() {
+        const query = document.getElementById('queryInput').value.trim();
+        if (!query) return;
+
+        const btn = document.getElementById('searchBtn');
+        const resultsDiv = document.getElementById('results');
+
+        btn.disabled = true;
+        resultsDiv.innerHTML = '<div id="loading">Searching...</div>';
+
+        try {
+            const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}&limit=50`);
+            const data = await response.json();
+            displayResults(data);
+        } catch (error) {
+            resultsDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function displayResults(data) {
+        const container = document.getElementById('results');
+
+        if (data.results.length === 0) {
+            container.innerHTML = '<div class="no-results">No results found</div>';
+            return;
+        }
+
+        let html = `<div class="results-info">Found ${data.results.length} results for "${escapeHtml(data.query)}"</div>`;
+
+        data.results.forEach(r => {
+            const dateStr = r.lastModified && r.lastModified !== 'Unknown'
+                ? r.lastModified
+                : 'Unknown';
+
+            const keywords = r.keywords.map(k => `${k.term} ${k.freq}`).join('; ');
+
+            // Parent link: 显示页面标题，点击跳转实际URL
+            let parentHtml = '<div class="link-item">None</div>';
+            if (r.parent) {
+                parentHtml = `<div class="link-item">
+                        <a href="${escapeHtml(r.parent.url)}" target="_blank" rel="noopener noreferrer">
+                            ${escapeHtml(r.parent.title)}
+                        </a>
+                    </div>`;
+            }
+
+            // Child links: 显示各页面标题，点击跳转实际URL
+            let childrenHtml = '<div class="link-item">None</div>';
+            if (r.children && r.children.length > 0) {
+                childrenHtml = r.children.map(child =>
+                    `<div class="link-item">
+                            <a href="${escapeHtml(child.url)}" target="_blank" rel="noopener noreferrer">
+                                ${escapeHtml(child.title)}
+                            </a>
+                        </div>`
+                ).join('');
+            }
+
+            html += `
+                    <div class="result-item">
+                        <div class="score">Score: ${r.score.toFixed(4)}</div>
+                        <div class="title">
+                            <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">
+                                ${escapeHtml(r.title)}
+                            </a>
+                        </div>
+                        <div class="url">
+                            <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">
+                                ${escapeHtml(r.url)}
+                            </a>
+                        </div>
+                        <div class="meta">${dateStr}, ${r.size} bytes</div>
+                        <div class="keywords">${escapeHtml(keywords)}</div>
+
+                        <div class="links-section">
+                            <div class="links-label">Parent Links:</div>
+                            <div class="link-list">${parentHtml}</div>
+                        </div>
+
+                        <div class="links-section">
+                            <div class="links-label">Child Links:</div>
+                            <div class="link-list">${childrenHtml}</div>
+                        </div>
+                    </div>
+                `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+</script>
+</body>
+</html>
