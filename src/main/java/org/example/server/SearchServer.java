@@ -72,18 +72,18 @@ public class SearchServer {
                     if (i > 0) json.append(",\n");
 
                     json.append("    {\n");
-                    json.append("      \"docId\": ").append(r.docId).append(",\n");
-                    json.append("      \"score\": ").append(String.format("%.4f", r.score)).append(",\n");
-                    json.append("      \"title\": \"").append(escapeJson(r.title)).append("\",\n");
-                    json.append("      \"url\": \"").append(escapeJson(r.url)).append("\",\n");
+                    json.append("      \"docId\": ").append(r.docId()).append(",\n");
+                    json.append("      \"score\": ").append(String.format("%.4f", r.score())).append(",\n");
+                    json.append("      \"title\": \"").append(escapeJson(r.title())).append("\",\n");
+                    json.append("      \"url\": \"").append(escapeJson(r.url())).append("\",\n");
                     json.append("      \"lastModified\": \"").append(escapeJson(
-                            r.lastModified > 0 ? dateFormat.format(new java.util.Date(r.lastModified)) : "Unknown"
+                            r.lastModified() > 0 ? dateFormat.format(new java.util.Date(r.lastModified())) : "Unknown"
                     )).append("\",\n");
-                    json.append("      \"size\": ").append(r.size).append(",\n");
+                    json.append("      \"size\": ").append(r.size()).append(",\n");
 
                     json.append("      \"keywords\": [\n");
                     int kwCount = 0;
-                    for (Map.Entry<String, Integer> kw : r.topKeywords) {
+                    for (Map.Entry<String, Integer> kw : r.topKeywords()) {
                         if (kwCount > 0) json.append(",\n");
                         json.append("        {\"term\": \"").append(escapeJson(kw.getKey()))
                                 .append("\", \"freq\": ").append(kw.getValue()).append("}");
@@ -92,9 +92,9 @@ public class SearchServer {
                     }
                     json.append("\n      ],\n");
 
-                    if (r.parentId != -1) {
-                        String pUrl = retriever.getPageUrl(r.parentId);
-                        String pTitle = retriever.getPageTitle(r.parentId);
+                    if (r.parentId() != -1) {
+                        String pUrl = retriever.getPageUrl(r.parentId());
+                        String pTitle = retriever.getPageTitle(r.parentId());
                         json.append("      \"parent\": {\"url\": \"").append(escapeJson(pUrl))
                                 .append("\", \"title\": \"").append(escapeJson(pTitle)).append("\"},\n");
                     } else {
@@ -102,9 +102,9 @@ public class SearchServer {
                     }
 
                     json.append("      \"children\": [");
-                    for (int j = 0; j < r.childrenIds.size(); j++) {
+                    for (int j = 0; j < r.childrenIds().size(); j++) {
                         if (j > 0) json.append(", ");
-                        int childId = r.childrenIds.get(j);
+                        int childId = r.childrenIds().get(j);
                         String cUrl = retriever.getPageUrl(childId);
                         String cTitle = retriever.getPageTitle(childId);
                         json.append("{\"url\": \"").append(escapeJson(cUrl))

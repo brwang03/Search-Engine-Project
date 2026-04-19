@@ -54,37 +54,15 @@ public class Retriever {
         }
     }
 
-    public static class SearchResult implements Comparable<SearchResult> {
-        public final int docId;
-        public final String url;
-        public final String title;
-        public final double score;
-        public final List<Map.Entry<String, Integer>> topKeywords;
-        public final int parentId;
-        public final List<Integer> childrenIds;
-        public final long lastModified;
-        public final int size;
-
-        public SearchResult(int docId, String url, String title, double score,
-                           List<Map.Entry<String, Integer>> topKeywords,
-                           int parentId, List<Integer> childrenIds,
-                           long lastModified, int size) {
-            this.docId = docId;
-            this.url = url;
-            this.title = title;
-            this.score = score;
-            this.topKeywords = topKeywords;
-            this.parentId = parentId;
-            this.childrenIds = childrenIds;
-            this.lastModified = lastModified;
-            this.size = size;
-        }
+    public record SearchResult(int docId, String url, String title, double score,
+                               List<Map.Entry<String, Integer>> topKeywords, int parentId, List<Integer> childrenIds,
+                               long lastModified, int size) implements Comparable<SearchResult> {
 
         @Override
-        public int compareTo(SearchResult other) {
-            return Double.compare(other.score, this.score);
+            public int compareTo(SearchResult other) {
+                return Double.compare(other.score, this.score);
+            }
         }
-    }
 
     public Retriever(String stopwordsPath, String bodyIndexDBName, String titleIndexDBName) throws IOException {
         this.stopStem = new StopStem(stopwordsPath);
@@ -110,18 +88,7 @@ public class Retriever {
                     int docId = Integer.parseInt(parts[0].trim());
                     String url = parts[1].trim();
                     int parentId = Integer.parseInt(parts[2].trim());
-                    String childrenStr = parts[3].trim();
-
-                    List<Integer> children = new ArrayList<>();
-                    if (!childrenStr.equals("[]")) {
-                        String childrenClean = childrenStr.substring(1, childrenStr.length() - 1);
-                        if (!childrenClean.isEmpty()) {
-                            String[] childArray = childrenClean.split(",");
-                            for (String c : childArray) {
-                                children.add(Integer.parseInt(c.trim()));
-                            }
-                        }
-                    }
+                    List<Integer> children = getChildren(parts);
 
                     long lastModified = 0;
                     int size = 0;
@@ -168,6 +135,22 @@ public class Retriever {
                 pageInfoCache.put(i, new PageInfo("page_" + i + ".html", "Document " + i, -1, new ArrayList<>(), 0, 0));
             }
         }
+    }
+
+    private static List<Integer> getChildren(String[] parts) {
+        String childrenStr = parts[3].trim();
+
+        List<Integer> children = new ArrayList<>();
+        if (!childrenStr.equals("[]")) {
+            String childrenClean = childrenStr.substring(1, childrenStr.length() - 1);
+            if (!childrenClean.isEmpty()) {
+                String[] childArray = childrenClean.split(",");
+                for (String c : childArray) {
+                    children.add(Integer.parseInt(c.trim()));
+                }
+            }
+        }
+        return children;
     }
 
     private ParsedQuery parseQuery(String query) {
@@ -242,7 +225,7 @@ public class Retriever {
                     count = postings.postings.size();
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                System.out.println(e.getMessage());
             }
             df.put(term, count);
         }
@@ -277,7 +260,7 @@ public class Retriever {
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            System.out.println(e.getMessage());
         }
         return weights;
     }
@@ -353,10 +336,9 @@ public class Retriever {
     }
 
     private double calculateDocumentScore(int docId, ParsedQuery query,
-                                          Map<String, Integer> df,
                                           Map<Integer, Double> titleWeights,
                                           Map<Integer, Double> bodyWeights) {
-        double score = 0.0;
+        double score;
         double titleScore = titleWeights.getOrDefault(docId, 0.0);
         double bodyScore = bodyWeights.getOrDefault(docId, 0.0);
 
@@ -411,7 +393,7 @@ public class Retriever {
 
         List<SearchResult> results = new ArrayList<>();
         for (int docId : candidateDocs) {
-            double score = calculateDocumentScore(docId, query, df, titleWeights, bodyWeights);
+            double score = calculateDocumentScore(docId, query, titleWeights, bodyWeights);
             if (score > 0) {
                 PageInfo info = pageInfoCache.get(docId);
                 String url = info != null ? info.url : "page_" + docId + ".html";
@@ -432,7 +414,7 @@ public class Retriever {
     }
 
     private List<Map.Entry<String, Integer>> getTopKeywords(int docId) {
-        Map<String, Integer> termFreqs = new HashMap<>();
+        Map<String, Integer> termFreq = new HashMap<>();
         try {
             jdbm.helper.FastIterator iter = bodyIndex.getHTree().keys();
             String key;
@@ -441,17 +423,17 @@ public class Retriever {
                 if (postings != null) {
                     for (Posting p : postings.postings) {
                         if (p.docId == docId) {
-                            termFreqs.put(key, p.freq);
+                            termFreq.put(key, p.freq);
                             break;
                         }
                     }
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            System.out.println(e.getMessage());
         }
 
-        List<Map.Entry<String, Integer>> sorted = new ArrayList<>(termFreqs.entrySet());
+        List<Map.Entry<String, Integer>> sorted = new ArrayList<>(termFreq.entrySet());
         sorted.sort((a, b) -> b.getValue().compareTo(a.getValue()));
         return sorted.subList(0, Math.min(5, sorted.size()));
     }
@@ -479,7 +461,7 @@ public class Retriever {
             SearchResult r = results.get(i);
             System.out.printf("[%d] Doc %d: %s (score=%.4f)%n", i + 1, r.docId, r.title, r.score);
             System.out.printf("    URL: %s%n", r.url);
-            System.out.printf("    Keywords: ");
+            System.out.print("    Keywords: ");
             for (Map.Entry<String, Integer> kw : r.topKeywords) {
                 System.out.printf("%s(%d) ", kw.getKey(), kw.getValue());
             }
@@ -562,7 +544,6 @@ public class Retriever {
             }
         } catch (IOException e) {
             System.err.println("Error initializing retriever: " + e.getMessage());
-            e.printStackTrace();
         }
     }
 }
