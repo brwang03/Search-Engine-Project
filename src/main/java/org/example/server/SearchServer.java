@@ -22,6 +22,7 @@ public class SearchServer {
     public static void main(String[] args) throws Exception {
         String stopwordsPath = "src/main/resources/stopwords.txt";
         retriever = new Retriever(stopwordsPath, "bodyIndex", "titleIndex");
+        retriever.setSimilarityMetric(Retriever.SimilarityMetric.DICE);
 
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/api/search", new SearchHandler());

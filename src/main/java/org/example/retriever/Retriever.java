@@ -22,7 +22,16 @@ public class Retriever {
     private static final double TITLE_BOOST = 3.0;
     private static final int MAX_RESULTS = 50;
 
+    public enum SimilarityMetric {
+        COSINE,
+        JACCARD,
+        DICE
+    }
+
     private final Map<Integer, PageInfo> pageInfoCache;
+    private final Map<Integer, Double> bodyDocNorms;
+    private final Map<Integer, Double> titleDocNorms;
+    private SimilarityMetric similarityMetric = SimilarityMetric.COSINE;
 
     private static class PageInfo {
         String url;
@@ -71,7 +80,13 @@ public class Retriever {
         this.tokenPattern = Pattern.compile("[^a-z0-9]+");
         this.totalDocuments = 300;
         this.pageInfoCache = new HashMap<>();
+        this.bodyDocNorms = buildDocumentNorms(this.bodyIndex);
+        this.titleDocNorms = buildDocumentNorms(this.titleIndex);
         loadPageInfo();
+    }
+
+    public void setSimilarityMetric(SimilarityMetric similarityMetric) {
+        this.similarityMetric = similarityMetric == null ? SimilarityMetric.COSINE : similarityMetric;
     }
 
     private void loadPageInfo() {
@@ -309,40 +324,154 @@ public class Retriever {
         return true;
     }
 
-    private double calculateCosineScore(Map<String, Double> docWeights, Map<String, Double> queryWeights) {
-        double dotProduct = 0.0;
-        double docNorm = 0.0;
-        double queryNorm = 0.0;
+    private Map<Integer, Double> buildDocumentNorms(InvertedIndex index) {
+        Map<Integer, Double> squaredNorms = new HashMap<>();
+        try {
+            jdbm.helper.FastIterator iter = index.getHTree().keys();
+            String term;
+            while ((term = (String) iter.next()) != null) {
+                PostingList postings = (PostingList) index.getHTree().get(term);
+                if (postings == null || postings.postings.isEmpty()) {
+                    continue;
+                }
 
-        for (Map.Entry<String, Double> e : docWeights.entrySet()) {
-            String term = e.getKey();
-            double docWeight = e.getValue();
-            Double queryWeight = queryWeights.get(term);
-            if (queryWeight != null) {
-                dotProduct += docWeight * queryWeight;
+                int maxTf = 0;
+                for (Posting p : postings.postings) {
+                    maxTf = Math.max(maxTf, p.freq);
+                }
+                if (maxTf == 0) {
+                    maxTf = 1;
+                }
+
+                double idf = calculateIDF(postings.postings.size());
+                for (Posting p : postings.postings) {
+                    double weight = calculateTFWeight(p.freq, maxTf, idf);
+                    squaredNorms.merge(p.docId, weight * weight, Double::sum);
+                }
             }
-            docNorm += docWeight * docWeight;
+        } catch (IOException e) {
+            System.out.println(e.getMessage());
         }
 
-        for (Double weight : queryWeights.values()) {
+        Map<Integer, Double> norms = new HashMap<>();
+        for (Map.Entry<Integer, Double> entry : squaredNorms.entrySet()) {
+            norms.put(entry.getKey(), Math.sqrt(entry.getValue()));
+        }
+        return norms;
+    }
+
+    private double calculateQueryNorm(Map<String, Double> queryWeights) {
+        double queryNorm = 0.0;
+        for (double weight : queryWeights.values()) {
             queryNorm += weight * weight;
         }
+        return Math.sqrt(queryNorm);
+    }
 
-        docNorm = Math.sqrt(docNorm);
-        queryNorm = Math.sqrt(queryNorm);
+    private double calculateCosineScore(Map<String, Double> docWeights, Map<String, Double> queryWeights,
+                                        double docNorm, double queryNorm) {
+        double dotProduct = calculateDotProduct(docWeights, queryWeights);
 
         if (docNorm == 0 || queryNorm == 0) return 0;
         return dotProduct / (docNorm * queryNorm);
     }
 
-    private double calculateDocumentScore(int docId, ParsedQuery query,
-                                          Map<Integer, Double> titleWeights,
-                                          Map<Integer, Double> bodyWeights) {
-        double score;
-        double titleScore = titleWeights.getOrDefault(docId, 0.0);
-        double bodyScore = bodyWeights.getOrDefault(docId, 0.0);
+    private double calculateDotProduct(Map<String, Double> docWeights, Map<String, Double> queryWeights) {
+        double dotProduct = 0.0;
+        for (Map.Entry<String, Double> e : docWeights.entrySet()) {
+            Double queryWeight = queryWeights.get(e.getKey());
+            if (queryWeight != null) {
+                dotProduct += e.getValue() * queryWeight;
+            }
+        }
+        return dotProduct;
+    }
 
-        score = titleScore * TITLE_BOOST + bodyScore;
+    private double calculateSquaredNorm(Map<String, Double> vector) {
+        double norm = 0.0;
+        for (double w : vector.values()) {
+            norm += w * w;
+        }
+        return norm;
+    }
+
+    private double calculateJaccardScore(Map<String, Double> docWeights, Map<String, Double> queryWeights) {
+        // Jaccard (vector form): (D·Q) / (||D||^2 + ||Q||^2 - D·Q)
+        double dot = calculateDotProduct(docWeights, queryWeights);
+        double docSq = calculateSquaredNorm(docWeights);
+        double querySq = calculateSquaredNorm(queryWeights);
+        double denominator = docSq + querySq - dot;
+
+        if (denominator == 0.0) return 0.0;
+        return dot / denominator;
+    }
+
+    private double calculateDiceScore(Map<String, Double> docWeights, Map<String, Double> queryWeights) {
+        // Dice (vector form): 2(D·Q) / (||D||^2 + ||Q||^2)
+        double dot = calculateDotProduct(docWeights, queryWeights);
+        double docSq = calculateSquaredNorm(docWeights);
+        double querySq = calculateSquaredNorm(queryWeights);
+        double denominator = docSq + querySq;
+
+        if (denominator == 0.0) return 0.0;
+        return (2.0 * dot) / denominator;
+    }
+
+    private double calculateSimilarity(Map<String, Double> docWeights, Map<String, Double> queryWeights,
+                                       SimilarityMetric metric) {
+        return switch (metric) {
+            case COSINE -> calculateCosineScore(docWeights, queryWeights,
+                    Math.sqrt(calculateSquaredNorm(docWeights)),
+                    calculateQueryNorm(queryWeights));
+            case JACCARD -> calculateJaccardScore(docWeights, queryWeights);
+            case DICE -> calculateDiceScore(docWeights, queryWeights);
+        };
+    }
+
+    private Map<Integer, Map<String, Double>> buildDocumentVectors(List<String> terms, boolean isTitle) {
+        Map<Integer, Map<String, Double>> vectors = new HashMap<>();
+
+        for (String term : terms) {
+            Map<Integer, Double> perDoc = getDocumentTFWeights(term, isTitle);
+            for (Map.Entry<Integer, Double> entry : perDoc.entrySet()) {
+                vectors.computeIfAbsent(entry.getKey(), k -> new HashMap<>())
+                        .put(term, entry.getValue());
+            }
+        }
+
+        return vectors;
+    }
+
+    private double calculateDocumentScore(int docId, ParsedQuery query,
+                                          Map<String, Double> queryWeights,
+                                          Map<Integer, Map<String, Double>> titleVectors,
+                                          Map<Integer, Map<String, Double>> bodyVectors,
+                                          SimilarityMetric metric) {
+        Map<String, Double> titleDocWeights = titleVectors.getOrDefault(docId, Collections.emptyMap());
+        Map<String, Double> bodyDocWeights = bodyVectors.getOrDefault(docId, Collections.emptyMap());
+
+        double score;
+        if (metric == SimilarityMetric.COSINE) {
+            double queryNorm = calculateQueryNorm(queryWeights);
+            double titleScore = calculateCosineScore(
+                    titleDocWeights,
+                    queryWeights,
+                    titleDocNorms.getOrDefault(docId, 0.0),
+                    queryNorm
+            );
+            double bodyScore = calculateCosineScore(
+                    bodyDocWeights,
+                    queryWeights,
+                    bodyDocNorms.getOrDefault(docId, 0.0),
+                    queryNorm
+            );
+            // final score = cosine(query, body) + TITLE_BOOST * cosine(query, title)
+            score = bodyScore + TITLE_BOOST * titleScore;
+        } else {
+            double titleScore = calculateSimilarity(titleDocWeights, queryWeights, metric);
+            double bodyScore = calculateSimilarity(bodyDocWeights, queryWeights, metric);
+            score = bodyScore + TITLE_BOOST * titleScore;
+        }
 
         for (int i = 0; i < query.phrases.size(); i++) {
             List<String> phrase = query.phrases.get(i);
@@ -353,13 +482,20 @@ public class Retriever {
             if (titleMatch) phraseBoost += 0.5;
             if (bodyMatch) phraseBoost += 0.25;
 
-            score *= (1.0 + phraseBoost);
+            // Phrase matches act as a multiplicative boost after similarity calculation.
+            if (phraseBoost > 0) {
+                score *= (1.0 + phraseBoost);
+            }
         }
 
         return score;
     }
 
     public List<SearchResult> search(String queryString) {
+        return search(queryString, this.similarityMetric);
+    }
+
+    public List<SearchResult> search(String queryString, SimilarityMetric metric) {
         ParsedQuery query = parseQuery(queryString);
         if (query.terms.isEmpty()) {
             return new ArrayList<>();
@@ -367,22 +503,12 @@ public class Retriever {
 
         Map<String, Integer> df = getDocumentFrequency(query.terms);
 
-        Map<Integer, Double> titleWeights = new HashMap<>();
-        Map<Integer, Double> bodyWeights = new HashMap<>();
-        Set<Integer> candidateDocs = new HashSet<>();
+        Map<Integer, Map<String, Double>> titleVectors = buildDocumentVectors(query.terms, true);
+        Map<Integer, Map<String, Double>> bodyVectors = buildDocumentVectors(query.terms, false);
 
-        for (String term : query.terms) {
-            Map<Integer, Double> tw = getDocumentTFWeights(term, true);
-            for (Map.Entry<Integer, Double> e : tw.entrySet()) {
-                titleWeights.merge(e.getKey(), e.getValue(), Double::sum);
-                candidateDocs.add(e.getKey());
-            }
-            Map<Integer, Double> bw = getDocumentTFWeights(term, false);
-            for (Map.Entry<Integer, Double> e : bw.entrySet()) {
-                bodyWeights.merge(e.getKey(), e.getValue(), Double::sum);
-                candidateDocs.add(e.getKey());
-            }
-        }
+        Set<Integer> candidateDocs = new HashSet<>();
+        candidateDocs.addAll(titleVectors.keySet());
+        candidateDocs.addAll(bodyVectors.keySet());
 
         Map<String, Double> queryWeights = new HashMap<>();
         for (String term : query.terms) {
@@ -393,7 +519,7 @@ public class Retriever {
 
         List<SearchResult> results = new ArrayList<>();
         for (int docId : candidateDocs) {
-            double score = calculateDocumentScore(docId, query, titleWeights, bodyWeights);
+            double score = calculateDocumentScore(docId, query, queryWeights, titleVectors, bodyVectors, metric);
             if (score > 0) {
                 PageInfo info = pageInfoCache.get(docId);
                 String url = info != null ? info.url : "page_" + docId + ".html";
@@ -518,6 +644,9 @@ public class Retriever {
 
             int limit = topK != null && topK > 0 ? Math.min(topK, MAX_RESULTS) : 5;
             int interactiveLimit = topK != null && topK > 0 ? Math.min(topK, MAX_RESULTS) : 10;
+
+            // Change this one line to quickly compare ranking functions.
+            retriever.setSimilarityMetric(SimilarityMetric.COSINE);
 
             if (interactive) {
                 runInteractive(retriever, interactiveLimit);
