@@ -3,7 +3,7 @@ Search Engine Project, HKUST, CSIT5930, Group 2
 
 ## Prerequisites
 
-- JDK 17
+- JDK 1.8
 - Maven
 
 ## Project Data Layout
@@ -23,7 +23,7 @@ Run Spider.java directly from src/main/java/org/example/spider. It will automati
 
 ## Indexer
 
-
+Run Indexer.java directly from src/main/java/org/example/indexer. It will index all the crawled html pages and save the db files under the db directory.
 
 ## Retriever
 
