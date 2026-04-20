@@ -14,6 +14,7 @@ public class PageData {
     private long lastModified;
     private String content;
     private String title;
+    private int size;
 
     public PageData(String url, int parentId) {
         this.pageId = idCounter.incrementAndGet();
@@ -33,7 +34,8 @@ public class PageData {
     public void setContent(String content) { this.content = content; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
-
+    public int getSize() { return size; }
+    public void setSize(int size) { this.size = size; }
     public boolean needsUpdate(long newModifiedTime) {
         return newModifiedTime > this.lastModified;
     }

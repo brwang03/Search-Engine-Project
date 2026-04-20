@@ -62,6 +62,15 @@ public class Spider {
                     continue;
                 }
 
+                byte[] rawBytes = response.bodyAsBytes();
+                int actualSize = rawBytes.length;
+
+                String charset = response.charset();
+                if (charset == null || charset.isEmpty()) {
+                    charset = "UTF-8";
+                }
+                Document doc = Jsoup.parse(new String(rawBytes, charset), currentUrl);
+                String htmlContent = doc.html();
                 long lastModified = LinkExtractor.getLastModified(response);
 
                 if (!indexManager.shouldFetch(currentUrl, lastModified)) {
@@ -69,13 +78,10 @@ public class Spider {
                     continue;
                 }
 
-                Document doc = response.parse();
-                String htmlContent = doc.html();
-
                 PageData page = indexManager.addOrUpdatePage(currentUrl, parentId, lastModified);
                 page.setContent(htmlContent);
                 page.setTitle(LinkExtractor.extractTitle(htmlContent));
-
+                page.setSize(actualSize);
                 indexManager.savePageContent(page);
 
                 visitedUrls.add(currentUrl);

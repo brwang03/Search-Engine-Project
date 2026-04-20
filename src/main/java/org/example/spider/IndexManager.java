@@ -66,6 +66,7 @@ public class IndexManager {
             writer.println("URL: " + page.getUrl());
             writer.println("Title: " + page.getTitle());
             writer.println("Last-Modified: " + new Date(page.getLastModified()));
+            writer.println("Size: " + page.getSize());        // ★ 新增
             writer.println("Parent-ID: " + page.getParentId());
             writer.println("Children-IDs: " + page.getChildrenIds());
             writer.println("\n--- Content ---\n");

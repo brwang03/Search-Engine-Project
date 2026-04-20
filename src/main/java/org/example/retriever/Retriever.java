@@ -115,7 +115,6 @@ public class Retriever {
 
                         if (htmlFile.exists()) {
                             String content = Files.readString(htmlFile.toPath());
-                            size = content.length();
                             String[] contentLines = content.split("\\r?\\n");
 
                             for (String cl : contentLines) {
@@ -133,6 +132,11 @@ public class Retriever {
                                     } catch (Exception e) {
                                         lastModified = htmlFile.lastModified();
                                     }
+                                } else if (cl.startsWith("Size:")) {
+                                    // ★ 读取爬虫记录的原始网页字节数
+                                    try {
+                                        size = Integer.parseInt(cl.substring("Size:".length()).trim());
+                                    } catch (NumberFormatException ignored) {}
                                 }
                             }
                         }
