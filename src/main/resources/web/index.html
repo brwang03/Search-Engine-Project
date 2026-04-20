@@ -84,6 +84,58 @@
         button:disabled { background-color: #ccc; }
         .hint { margin-top: 8px; color: #666; font-size: 14px; }
         .results-info { margin-bottom: 10px; color: #666; }
+        .keyword-browser {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #eee;
+        }
+        .keyword-browser-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        #keywordFilter {
+            flex: 1;
+            padding: 8px 10px;
+            font-size: 13px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        #keywordFilter:focus { outline: none; border-color: #4CAF50; }
+        .keyword-list {
+            margin-top: 10px;
+            max-height: 180px;
+            overflow: auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .keyword-pill {
+            padding: 6px 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 999px;
+            background: #fafafa;
+            font-size: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .keyword-pill:hover { border-color: #4CAF50; background: #f0fff4; }
+        .selected-keywords {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .selected-pill {
+            padding: 6px 10px;
+            border: 1px solid #c8e6c9;
+            border-radius: 999px;
+            background: #e8f5e9;
+            font-size: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .selected-pill:hover { border-color: #4CAF50; }
 
         .result-item {
             background: white;
@@ -295,6 +347,15 @@
         <div class="hint">
             Tip: Use double quotes for phrase search (e.g., "hong kong"). Max 50 results displayed.
         </div>
+        <div class="keyword-browser">
+            <div class="keyword-browser-row">
+                <input type="text" id="keywordFilter" placeholder="Browse stemmed keywords (type a prefix to filter)" />
+                <button class="btn-secondary" id="keywordMoreBtn" onclick="loadMoreKeywords()">More</button>
+                <button class="btn-secondary" id="keywordClearBtn" onclick="clearSelectedKeywords()">Clear</button>
+            </div>
+            <div id="selectedKeywordChips" class="selected-keywords"></div>
+            <div id="keywordList" class="keyword-list"></div>
+        </div>
         <!-- 历史查询标签区 -->
         <div id="historyChips" class="history-chips-container"></div>
     </div>
@@ -327,6 +388,14 @@
     const STOP_WORDS = new Set(DEFAULT_STOP_WORDS);
     let lastResults = [];
     let lastQuery = '';
+    const KEYWORD_PAGE_SIZE = 60;
+    let keywordOffset = 0;
+    let keywordTotal = 0;
+    let keywordLastPrefix = '';
+    let keywordLoading = false;
+    let keywordDebounceTimer = null;
+    let selectedKeywords = [];
+    let suppressQueryInputSync = false;
 
     async function loadStopWords() {
         try {
@@ -346,6 +415,130 @@
     document.getElementById('queryInput').addEventListener('keypress', function(e) {
         if (e.key === 'Enter') performSearch();
     });
+    document.getElementById('queryInput').addEventListener('input', function() {
+        if (suppressQueryInputSync) return;
+        if (selectedKeywords.length > 0) {
+            selectedKeywords = [];
+            renderSelectedKeywords();
+        }
+    });
+
+    function setQueryFromSelectedKeywords() {
+        const input = document.getElementById('queryInput');
+        suppressQueryInputSync = true;
+        input.value = selectedKeywords.join(' ');
+        suppressQueryInputSync = false;
+    }
+
+    function renderSelectedKeywords() {
+        const container = document.getElementById('selectedKeywordChips');
+        if (!container) return;
+        container.innerHTML = '';
+        if (selectedKeywords.length === 0) return;
+        selectedKeywords.forEach(t => {
+            const el = document.createElement('span');
+            el.className = 'selected-pill';
+            el.textContent = `${t} ×`;
+            el.addEventListener('click', () => removeSelectedKeyword(t));
+            container.appendChild(el);
+        });
+    }
+
+    function addSelectedKeyword(term) {
+        const t = (term || '').trim().toLowerCase();
+        if (!t) return;
+        if (!selectedKeywords.includes(t)) {
+            selectedKeywords.push(t);
+        }
+        setQueryFromSelectedKeywords();
+        renderSelectedKeywords();
+    }
+
+    function removeSelectedKeyword(term) {
+        const t = (term || '').trim().toLowerCase();
+        selectedKeywords = selectedKeywords.filter(x => x !== t);
+        setQueryFromSelectedKeywords();
+        renderSelectedKeywords();
+    }
+
+    function clearSelectedKeywords() {
+        selectedKeywords = [];
+        setQueryFromSelectedKeywords();
+        renderSelectedKeywords();
+    }
+
+    function renderKeywordList(keywords, append) {
+        const list = document.getElementById('keywordList');
+        if (!list) return;
+        if (!append) {
+            list.innerHTML = '';
+        }
+        (keywords || []).forEach(k => {
+            const term = (k || '').toString();
+            if (!term) return;
+            const el = document.createElement('span');
+            el.className = 'keyword-pill';
+            el.textContent = term;
+            el.addEventListener('click', () => addSelectedKeyword(term));
+            list.appendChild(el);
+        });
+    }
+
+    async function fetchKeywords(reset) {
+        if (keywordLoading) return;
+        const prefix = (document.getElementById('keywordFilter')?.value || '').trim().toLowerCase();
+
+        if (reset) {
+            keywordOffset = 0;
+            keywordTotal = 0;
+            keywordLastPrefix = prefix;
+            renderKeywordList([], false);
+        }
+        if (prefix !== keywordLastPrefix) {
+            keywordOffset = 0;
+            keywordTotal = 0;
+            keywordLastPrefix = prefix;
+            renderKeywordList([], false);
+        }
+
+        keywordLoading = true;
+        try {
+            const url = `${API_BASE}/api/keywords?prefix=${encodeURIComponent(prefix)}&offset=${keywordOffset}&limit=${KEYWORD_PAGE_SIZE}`;
+            const response = await fetch(url);
+            if (!response.ok) return;
+            const data = await response.json();
+            const kws = Array.isArray(data.keywords) ? data.keywords : [];
+            keywordTotal = Number.isFinite(data.total) ? data.total : keywordTotal;
+            renderKeywordList(kws, keywordOffset > 0);
+            keywordOffset += kws.length;
+
+            const moreBtn = document.getElementById('keywordMoreBtn');
+            if (moreBtn) {
+                moreBtn.disabled = keywordOffset >= keywordTotal || kws.length === 0;
+            }
+        } catch (e) {
+            const moreBtn = document.getElementById('keywordMoreBtn');
+            if (moreBtn) moreBtn.disabled = true;
+        } finally {
+            keywordLoading = false;
+        }
+    }
+
+    function loadMoreKeywords() {
+        fetchKeywords(false);
+    }
+
+    function initKeywordBrowser() {
+        const filter = document.getElementById('keywordFilter');
+        if (filter) {
+            filter.addEventListener('input', () => {
+                if (keywordDebounceTimer) clearTimeout(keywordDebounceTimer);
+                keywordDebounceTimer = setTimeout(() => fetchKeywords(true), 150);
+            });
+        }
+        fetchKeywords(true);
+        renderSelectedKeywords();
+    }
 
     async function performSearch() {
         const query = document.getElementById('queryInput').value.trim();
@@ -658,7 +851,7 @@
     // 页面加载时渲染历史记录
     renderHistory();
     loadStopWords();
+    initKeywordBrowser();
 </script>
 </body>
 </html>
-

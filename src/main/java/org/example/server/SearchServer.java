@@ -27,6 +27,7 @@ public class SearchServer {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/api/search", new SearchHandler());
+        server.createContext("/api/keywords", new KeywordsHandler());
         server.createContext("/api/stopwords", new StopwordsHandler());
         server.createContext("/view", new ViewHandler());
         server.createContext("/", new StaticFileHandler());
@@ -63,7 +64,7 @@ public class SearchServer {
 
             StringBuilder json = new StringBuilder();
             json.append("{\n");
-            json.append("  \"query\": \"").append(escapeJson(query)).append("\",\n");
+            json.append("  \"query\": \"").append(SearchServer.escapeJson(query)).append("\",\n");
             json.append("  \"results\": [\n");
 
             if (!query.isEmpty()) {
@@ -77,9 +78,9 @@ public class SearchServer {
                     json.append("    {\n");
                     json.append("      \"docId\": ").append(r.docId).append(",\n");
                     json.append("      \"score\": ").append(String.format("%.4f", r.score)).append(",\n");
-                    json.append("      \"title\": \"").append(escapeJson(r.title)).append("\",\n");
-                    json.append("      \"url\": \"").append(escapeJson(r.url)).append("\",\n");
-                    json.append("      \"lastModified\": \"").append(escapeJson(
+                    json.append("      \"title\": \"").append(SearchServer.escapeJson(r.title)).append("\",\n");
+                    json.append("      \"url\": \"").append(SearchServer.escapeJson(r.url)).append("\",\n");
+                    json.append("      \"lastModified\": \"").append(SearchServer.escapeJson(
                             r.lastModified > 0 ? dateFormat.format(new java.util.Date(r.lastModified)) : "Unknown"
                     )).append("\",\n");
                     json.append("      \"size\": ").append(r.size).append(",\n");
@@ -88,7 +89,7 @@ public class SearchServer {
                     int kwCount = 0;
                     for (Map.Entry<String, Integer> kw : r.topKeywords) {
                         if (kwCount > 0) json.append(",\n");
-                        json.append("        {\"term\": \"").append(escapeJson(kw.getKey()))
+                        json.append("        {\"term\": \"").append(SearchServer.escapeJson(kw.getKey()))
                                 .append("\", \"freq\": ").append(kw.getValue()).append("}");
                         kwCount++;
                         if (kwCount >= 5) break;
@@ -98,8 +99,8 @@ public class SearchServer {
                     if (r.parentId != -1) {
                         String pUrl = retriever.getPageUrl(r.parentId);
                         String pTitle = retriever.getPageTitle(r.parentId);
-                        json.append("      \"parent\": {\"url\": \"").append(escapeJson(pUrl))
-                                .append("\", \"title\": \"").append(escapeJson(pTitle)).append("\"},\n");
+                        json.append("      \"parent\": {\"url\": \"").append(SearchServer.escapeJson(pUrl))
+                                .append("\", \"title\": \"").append(SearchServer.escapeJson(pTitle)).append("\"},\n");
                     } else {
                         json.append("      \"parent\": null,\n");
                     }
@@ -110,8 +111,8 @@ public class SearchServer {
                         int childId = r.childrenIds.get(j);
                         String cUrl = retriever.getPageUrl(childId);
                         String cTitle = retriever.getPageTitle(childId);
-                        json.append("{\"url\": \"").append(escapeJson(cUrl))
-                                .append("\", \"title\": \"").append(escapeJson(cTitle)).append("\"}");
+                        json.append("{\"url\": \"").append(SearchServer.escapeJson(cUrl))
+                                .append("\", \"title\": \"").append(SearchServer.escapeJson(cTitle)).append("\"}");
                     }
                     json.append("]\n");
 
@@ -127,14 +128,60 @@ public class SearchServer {
                 os.write(response);
             }
         }
+    }
 
-        private String escapeJson(String s) {
-            if (s == null) return "";
-            return s.replace("\\", "\\\\")
-                    .replace("\"", "\\\"")
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r")
-                    .replace("\t", "\\t");
+    static class KeywordsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+            exchange.getResponseHeaders().add("Content-Type", "application/json; charset=UTF-8");
+
+            String prefix = "";
+            int offset = 0;
+            int limit = 60;
+
+            String rawQuery = exchange.getRequestURI().getRawQuery();
+            if (rawQuery != null) {
+                String[] pairs = rawQuery.split("&");
+                for (String pair : pairs) {
+                    int idx = pair.indexOf("=");
+                    if (idx > 0) {
+                        String key = URLDecoder.decode(pair.substring(0, idx), "UTF-8");
+                        String value = URLDecoder.decode(pair.substring(idx + 1), "UTF-8");
+                        if (key.equals("prefix")) {
+                            prefix = value;
+                        } else if (key.equals("offset")) {
+                            try { offset = Math.max(0, Integer.parseInt(value)); }
+                            catch (NumberFormatException ignored) {}
+                        } else if (key.equals("limit")) {
+                            try { limit = Math.min(200, Math.max(1, Integer.parseInt(value))); }
+                            catch (NumberFormatException ignored) {}
+                        }
+                    }
+                }
+            }
+
+            Retriever.KeywordSlice slice = retriever.getIndexedKeywords(prefix, offset, limit);
+
+            StringBuilder json = new StringBuilder();
+            json.append("{\n");
+            json.append("  \"prefix\": \"").append(SearchServer.escapeJson(prefix)).append("\",\n");
+            json.append("  \"offset\": ").append(offset).append(",\n");
+            json.append("  \"limit\": ").append(limit).append(",\n");
+            json.append("  \"total\": ").append(slice.total).append(",\n");
+            json.append("  \"keywords\": [");
+            for (int i = 0; i < slice.keywords.size(); i++) {
+                if (i > 0) json.append(", ");
+                json.append("\"").append(SearchServer.escapeJson(slice.keywords.get(i))).append("\"");
+            }
+            json.append("]\n");
+            json.append("}");
+
+            byte[] response = json.toString().getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            }
         }
     }
 
@@ -226,5 +273,14 @@ public class SearchServer {
                 os.write(content);
             }
         }
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }
