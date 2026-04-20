@@ -36,6 +36,17 @@ public class Retriever {
     private SimilarityMetric similarityMetric = SimilarityMetric.COSINE;
     private final Map<String, Set<String>> synonymDictionary;
     private boolean enableSynonymExpansion = false;
+    private final List<String> indexedKeywordsSorted;
+
+    public static class KeywordSlice {
+        public final List<String> keywords;
+        public final int total;
+
+        KeywordSlice(List<String> keywords, int total) {
+            this.keywords = keywords;
+            this.total = total;
+        }
+    }
 
     private static class PageInfo {
         String url;
@@ -106,6 +117,7 @@ public class Retriever {
         this.totalDocuments = 300;
         this.pageInfoCache = new HashMap<>();
         this.synonymDictionary = new HashMap<>();
+        this.indexedKeywordsSorted = buildIndexedKeywordsSorted();
         this.bodyDocNorms = buildDocumentNorms(this.bodyIndex);
         this.titleDocNorms = buildDocumentNorms(this.titleIndex);
         loadSynonyms();
@@ -114,6 +126,60 @@ public class Retriever {
 
     public void setEnableSynonymExpansion(boolean enable) {
         this.enableSynonymExpansion = enable;
+    }
+
+    public KeywordSlice getIndexedKeywords(String prefix, int offset, int limit) {
+        String p = prefix == null ? "" : prefix.trim().toLowerCase(Locale.ROOT);
+        int safeOffset = Math.max(0, offset);
+        int safeLimit = Math.max(1, limit);
+
+        int startIdx = 0;
+        int endIdx = indexedKeywordsSorted.size();
+        if (!p.isEmpty()) {
+            startIdx = lowerBound(indexedKeywordsSorted, p);
+            endIdx = lowerBound(indexedKeywordsSorted, p + '\uffff');
+        }
+
+        int total = Math.max(0, endIdx - startIdx);
+        int from = Math.min(startIdx + safeOffset, endIdx);
+        int to = Math.min(from + safeLimit, endIdx);
+
+        return new KeywordSlice(indexedKeywordsSorted.subList(from, to), total);
+    }
+
+    private static int lowerBound(List<String> list, String key) {
+        int lo = 0;
+        int hi = list.size();
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (list.get(mid).compareTo(key) < 0) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    private List<String> buildIndexedKeywordsSorted() {
+        TreeSet<String> terms = new TreeSet<>();
+        loadTermsFromIndex(bodyIndex, terms);
+        loadTermsFromIndex(titleIndex, terms);
+        return new ArrayList<>(terms);
+    }
+
+    private void loadTermsFromIndex(InvertedIndex index, Set<String> out) {
+        try {
+            jdbm.helper.FastIterator iter = index.getHTree().keys();
+            String term;
+            while ((term = (String) iter.next()) != null) {
+                if (!term.isEmpty()) {
+                    out.add(term);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println(e.getMessage());
+        }
     }
 
     private void loadPageInfo() {

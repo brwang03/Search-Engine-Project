@@ -3,120 +3,49 @@ Search Engine Project, HKUST, CSIT5930, Group 2
 
 ## Prerequisites
 
-- JDK 1.8
-- Maven
+- JDK 17
 
-## Project Data Layout
-
-- HTML corpus: `src/main/resources/html_pages/page_<docId>.html`
-- Link structure: `src/main/resources/link_structure.txt`
-- Stopwords: `src/main/resources/stopwords.txt`
-- Inverted indexes (JDBM): `db/`
-  - `db/bodyIndex.db`, `db/bodyIndex.lg`
-  - `db/titleIndex.db`, `db/titleIndex.lg`
-
-Important: retrieval reads from `db/` (the inverted index), not by scanning HTML files at query time.
-
-## Spider
-
-Run Spider.java directly from src/main/java/org/example/spider. It will automatically crawl web pages and save them in src/main/resources/html_pages, add meta tags to the beginning of each HTML file, and finally generate link_structure.txt.
-
-## Indexer
-
-Run Indexer.java directly from src/main/java/org/example/indexer. It will index all the crawled html pages and save the db files under the db directory.
-
-## Retriever
-
-### Scenario 1: Rebuild Index + Run Retrieval
-
-Use this when:
-
-- `db/` is missing
-- you changed the HTML corpus
-- you suspect docId mismatch (query returns a docId whose `page_<docId>.html` does not contain the query terms)
-
-#### 1) Build the code
+## Build
 
 ```bash
-export JAVA_HOME=/path/to/jdk-17
-export PATH="$JAVA_HOME/bin:$PATH"
-
-./mvnw -DskipTests clean compile
+./scripts/mvnw -DskipTests clean compile
+./scripts/mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt -Dmdep.pathSeparator=:
 ```
 
-#### 2) Rebuild the index from current HTML pages
-
-This recreates `db/` from `src/main/resources/html_pages/`:
+If you don't have JDK 17 on PATH but you have a local JDK under `.jdk/`:
 
 ```bash
-rm -rf db
-mkdir -p db
+JAVA_HOME="$PWD/.jdk/jdk-17.0.14+7" PATH="$PWD/.jdk/jdk-17.0.14+7/bin:$PATH" ./scripts/mvnw -DskipTests clean compile
+JAVA_HOME="$PWD/.jdk/jdk-17.0.14+7" PATH="$PWD/.jdk/jdk-17.0.14+7/bin:$PATH" ./scripts/mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt -Dmdep.pathSeparator=:
+```
 
-./mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt -Dmdep.pathSeparator=:
+## CLI (Interactive Search)
+
+Run:
+
+```bash
+./scripts/run_retriver.sh --interactive --top 10
+```
+
+Exit with `:q` (or `:quit` / `exit`).
+
+## Web Page (Frontend + Backend)
+
+Start the server:
+
+```bash
+java -cp "target/classes:$(cat target/classpath.txt)" org.example.server.SearchServer
+```
+
+Open:
+
+`http://localhost:8080/`
+
+## Rebuild Index (Only If Needed)
+
+If `db/` is missing or out of sync with `src/main/resources/html_pages/`:
+
+```bash
+rm -rf db && mkdir -p db
 java -cp "target/classes:$(cat target/classpath.txt)" org.example.indexer.Indexer
 ```
-
-DocId mapping rule:
-
-- the indexer derives `docId` from the filename `page_<docId>.html` to keep docId stable across rebuilds.
-
-#### 3) Run retrieval (interactive or one-off)
-
-Interactive mode:
-
-```bash
-./run_retriver.sh --interactive --top 10
-```
-
-One-off query:
-
-```bash
-./run_retriver.sh --top 10 "hong kong"
-./run_retriver.sh --top 10 "\"hong kong\" universities"
-```
-
-Exit interactive mode with `:q` (or `:quit` / `exit`).
-
-### Scenario 2: Retrieval Only (Use Existing `db/`)
-
-Use this when:
-
-- `db/` already exists and matches the current corpus
-- you only want to run/search
-
-#### 1) Sanity-check `db/` exists
-
-```bash
-ls -la db/
-```
-
-You should see `bodyIndex.db` / `titleIndex.db` (and their `.lg` files).
-
-#### 2) Run retrieval
-
-Interactive:
-
-```bash
-./run_retriver.sh --interactive --top 10
-```
-
-One-off:
-
-```bash
-./run_retriver.sh --top 10 hong kong
-```
-
-### Debugging: Verify Returned docId Matches Page Content
-
-If a query returns `Doc <id>` and you want to confirm it matches the HTML page:
-
-```bash
-DOCID=71
-grep -inE '\b(hong|kong)\b' "src/main/resources/html_pages/page_${DOCID}.html" | head
-```
-
-If the page does not contain the query terms but the retriever still returns it, the `db/` index is out of sync with the HTML corpus. Rebuild the index (Scenario 1).
-
-## Server
-
-Run src/main/java/org/example/server/SearchServer.java directly. Once you see “Search server started at http://localhost:8080 ” and click http://localhost:8080, you can start using the search engine.

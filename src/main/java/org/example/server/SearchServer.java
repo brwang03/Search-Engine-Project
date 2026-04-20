@@ -27,6 +27,7 @@ public class SearchServer {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/api/search", new SearchHandler());
+        server.createContext("/api/keywords", new KeywordsHandler());
         server.createContext("/api/stopwords", new StopwordsHandler());
         server.createContext("/view", new ViewHandler());
         server.createContext("/", new StaticFileHandler());
@@ -148,14 +149,60 @@ public class SearchServer {
                 }
             }
         }
+    }
 
-        private String escapeJson(String s) {
-            if (s == null) return "";
-            return s.replace("\\", "\\\\")
-                    .replace("\"", "\\\"")
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r")
-                    .replace("\t", "\\t");
+    static class KeywordsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+            exchange.getResponseHeaders().add("Content-Type", "application/json; charset=UTF-8");
+
+            String prefix = "";
+            int offset = 0;
+            int limit = 60;
+
+            String rawQuery = exchange.getRequestURI().getRawQuery();
+            if (rawQuery != null) {
+                String[] pairs = rawQuery.split("&");
+                for (String pair : pairs) {
+                    int idx = pair.indexOf("=");
+                    if (idx > 0) {
+                        String key = URLDecoder.decode(pair.substring(0, idx), "UTF-8");
+                        String value = URLDecoder.decode(pair.substring(idx + 1), "UTF-8");
+                        if (key.equals("prefix")) {
+                            prefix = value;
+                        } else if (key.equals("offset")) {
+                            try { offset = Math.max(0, Integer.parseInt(value)); }
+                            catch (NumberFormatException ignored) {}
+                        } else if (key.equals("limit")) {
+                            try { limit = Math.min(200, Math.max(1, Integer.parseInt(value))); }
+                            catch (NumberFormatException ignored) {}
+                        }
+                    }
+                }
+            }
+
+            Retriever.KeywordSlice slice = retriever.getIndexedKeywords(prefix, offset, limit);
+
+            StringBuilder json = new StringBuilder();
+            json.append("{\n");
+            json.append("  \"prefix\": \"").append(SearchServer.escapeJson(prefix)).append("\",\n");
+            json.append("  \"offset\": ").append(offset).append(",\n");
+            json.append("  \"limit\": ").append(limit).append(",\n");
+            json.append("  \"total\": ").append(slice.total).append(",\n");
+            json.append("  \"keywords\": [");
+            for (int i = 0; i < slice.keywords.size(); i++) {
+                if (i > 0) json.append(", ");
+                json.append("\"").append(SearchServer.escapeJson(slice.keywords.get(i))).append("\"");
+            }
+            json.append("]\n");
+            json.append("}");
+
+            byte[] response = json.toString().getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            }
         }
     }
 
@@ -247,5 +294,14 @@ public class SearchServer {
                 os.write(content);
             }
         }
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }

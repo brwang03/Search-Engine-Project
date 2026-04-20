@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 echo "===================================="
@@ -28,25 +29,28 @@ JAVA_VERSION_OUT="$("$JAVA_BIN" -version 2>&1 | head -n 1)"
 if [[ "$JAVA_VERSION_OUT" != *"17."* && "$JAVA_VERSION_OUT" != *" 17"* ]]; then
   echo "Error: Java 17 is required."
   echo "Current version: $JAVA_VERSION_OUT"
-  echo "Tip: install JDK 17 or place it under ./.jdk/jdk-17.0.14+7"
+  echo "Tip: install JDK 17 or place it under $PROJECT_DIR/.jdk/jdk-17.0.14+7"
   exit 1
 fi
 
-if [[ ! -x "$PROJECT_DIR/mvnw" ]]; then
-  echo "Error: ./mvnw not found or not executable."
+MVNW="$SCRIPT_DIR/mvnw"
+if [[ ! -x "$MVNW" ]]; then
+  echo "Error: $MVNW not found or not executable."
   exit 1
 fi
 
-export JAVA_HOME="$LOCAL_JDK"
-export PATH="$JAVA_HOME/bin:$PATH"
+if [[ -x "$LOCAL_JDK/bin/java" && -x "$LOCAL_JDK/bin/javac" ]]; then
+  export JAVA_HOME="$LOCAL_JDK"
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
 
 echo
 echo "Step 1: Building with Maven..."
-./mvnw -q -DskipTests clean compile
+"$MVNW" -q -DskipTests clean compile
 
 echo
 echo "Step 2: Resolving dependency classpath..."
-./mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt -Dmdep.pathSeparator=:
+"$MVNW" -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt -Dmdep.pathSeparator=:
 
 echo
 echo "Step 3: Running retriever..."
