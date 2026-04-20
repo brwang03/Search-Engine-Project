@@ -5,6 +5,8 @@ import org.jsoup.nodes.Document;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.BufferedReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Batch HTML Indexer with support for:
@@ -109,9 +112,17 @@ public class Indexer {
      */
     public void processHtmlFile(File htmlFile, int docId) {
         try {
+            // Read file content and skip the first 9 lines (metadata)
+            String htmlContent;
+            try (BufferedReader reader = Files.newBufferedReader(htmlFile.toPath(), StandardCharsets.UTF_8)) {
+                htmlContent = reader.lines()
+                    .skip(9)  // Skip first 9 lines (metadata)
+                    .collect(Collectors.joining("\n"));
+            }
+
             // Parse HTML with jsoup
-            Document doc = Jsoup.parse(htmlFile, "UTF-8");
-            
+            Document doc = Jsoup.parse(htmlContent, "UTF-8");
+
             // Extract and process TITLE
             indexText(titleIndex, doc.select("title").text(), docId);
 

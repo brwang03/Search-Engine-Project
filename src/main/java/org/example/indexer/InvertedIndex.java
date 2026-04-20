@@ -75,34 +75,5 @@ public class InvertedIndex
 			PostingList postingList = (PostingList) hTree.get(key);
 			System.out.println(key + " -> " + postingList.toString());
 		}
-	}	
-
-	/* Sample Output
-	public static void main(String[] args)
-	{
-		try {
-			InvertedIndex index = new InvertedIndex("lab1","ht1");
-
-			index.addEntry("cat", 1, 2);
-			index.addEntry("cat", 1, 6);
-			index.addEntry("dog", 2, 3);
-			System.out.println("First print");
-			index.printAll();
-			
-			index.addEntry("cat", 8, 3);
-			index.addEntry("dog", 2, 10);
-			index.addEntry("dog", 8, 13);
-			index.addEntry("dog", 10, 5);
-			System.out.println("Second print");
-			index.printAll();
-			
-			index.delEntry("dog");
-			System.out.println("Third print");
-			index.printAll();
-			index.finalizeIndex();
-		} catch (IOException ioe) {
-			System.err.println(ioe.getMessage());
-		}
 	}
-	 */
 }

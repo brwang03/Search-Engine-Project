@@ -63,15 +63,36 @@ public class Retriever {
         }
     }
 
-    public record SearchResult(int docId, String url, String title, double score,
-                               List<Map.Entry<String, Integer>> topKeywords, int parentId, List<Integer> childrenIds,
-                               long lastModified, int size) implements Comparable<SearchResult> {
+    public static class SearchResult implements Comparable<SearchResult> {
+        public final int docId;
+        public final String url;
+        public final String title;
+        public final double score;
+        public final List<Map.Entry<String, Integer>> topKeywords;
+        public final int parentId;
+        public final List<Integer> childrenIds;
+        public final long lastModified;
+        public final int size;
+
+        public SearchResult(int docId, String url, String title, double score,
+                           List<Map.Entry<String, Integer>> topKeywords, int parentId, List<Integer> childrenIds,
+                           long lastModified, int size) {
+            this.docId = docId;
+            this.url = url;
+            this.title = title;
+            this.score = score;
+            this.topKeywords = topKeywords;
+            this.parentId = parentId;
+            this.childrenIds = childrenIds;
+            this.lastModified = lastModified;
+            this.size = size;
+        }
 
         @Override
-            public int compareTo(SearchResult other) {
-                return Double.compare(other.score, this.score);
-            }
+        public int compareTo(SearchResult other) {
+            return Double.compare(other.score, this.score);
         }
+    }
 
     public Retriever(String stopwordsPath, String bodyIndexDBName, String titleIndexDBName) throws IOException {
         this.stopStem = new StopStem(stopwordsPath);
@@ -114,8 +135,7 @@ public class Retriever {
                         File htmlFile = new File(htmlPath);
 
                         if (htmlFile.exists()) {
-                            String content = Files.readString(htmlFile.toPath());
-                            String[] contentLines = content.split("\\r?\\n");
+                            List<String> contentLines = Files.readAllLines(htmlFile.toPath());
 
                             for (String cl : contentLines) {
                                 if (cl.startsWith("URL:")) {
@@ -423,13 +443,18 @@ public class Retriever {
 
     private double calculateSimilarity(Map<String, Double> docWeights, Map<String, Double> queryWeights,
                                        SimilarityMetric metric) {
-        return switch (metric) {
-            case COSINE -> calculateCosineScore(docWeights, queryWeights,
-                    Math.sqrt(calculateSquaredNorm(docWeights)),
-                    calculateQueryNorm(queryWeights));
-            case JACCARD -> calculateJaccardScore(docWeights, queryWeights);
-            case DICE -> calculateDiceScore(docWeights, queryWeights);
-        };
+        switch (metric) {
+            case COSINE:
+                return calculateCosineScore(docWeights, queryWeights,
+                        Math.sqrt(calculateSquaredNorm(docWeights)),
+                        calculateQueryNorm(queryWeights));
+            case JACCARD:
+                return calculateJaccardScore(docWeights, queryWeights);
+            case DICE:
+                return calculateDiceScore(docWeights, queryWeights);
+            default:
+                return 0.0;
+        }
     }
 
     private Map<Integer, Map<String, Double>> buildDocumentVectors(List<String> terms, boolean isTitle) {

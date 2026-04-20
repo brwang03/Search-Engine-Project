@@ -1,12 +1,10 @@
 package org.example.indexer;
 
-import java.io.Serial;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
 public class Posting implements Serializable {
-    @Serial
     private static final long serialVersionUID = -7578805189256116858L;
     public int docId;
     public int freq;
