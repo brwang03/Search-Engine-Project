@@ -158,6 +158,113 @@
         body.search-active #results {
             width: 100%;
         }
+
+        /* ========== Query History Styles ========== */
+        .history-chips-container { margin-top: 12px; }
+        .history-label { font-size: 12px; color: #888; margin-bottom: 6px; font-weight: 600; }
+        .chips-wrapper { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .history-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 12px;
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-radius: 16px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+            user-select: none;
+        }
+        .history-chip:hover { background: #c8e6c9; border-color: #a5d6a7; transform: translateY(-1px); }
+        .chip-delete {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            font-size: 11px;
+            line-height: 1;
+            margin-left: 2px;
+            color: #666;
+        }
+        .chip-delete:hover { background: #ef5350; color: white; }
+        .history-more { background: #f5f5f5; color: #666; font-weight: 500; }
+        .history-more:hover { background: #e0e0e0; color: #333; }
+
+        /* Full History Panel */
+        .history-backdrop {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 999;
+            backdrop-filter: blur(2px);
+        }
+        .full-history-panel {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%; max-width: 600px;
+            max-height: 70vh;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: none; /* toggled to flex via JS */
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+            background: #fafafa;
+        }
+        .panel-header h3 { margin: 0; font-size: 18px; color: #333; }
+        .panel-actions { display: flex; gap: 8px; }
+        .btn-secondary {
+            padding: 6px 12px;
+            font-size: 13px;
+            border: 1px solid #ddd;
+            background: white;
+            color: #555;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-secondary:hover { background: #f5f5f5; }
+        .btn-danger { color: #d32f2f; border-color: #ffcdd2; }
+        .btn-danger:hover { background: #ffebee; }
+        .full-history-list { overflow-y: auto; padding: 0; }
+        .history-row {
+            padding: 14px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.15s;
+        }
+        .history-row:hover { background: #f5f5f5; }
+        .history-row:last-child { border-bottom: none; }
+        .history-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
+        .history-query { font-weight: 600; color: #1a0dab; font-size: 14px; }
+        .history-time { color: #999; font-size: 12px; }
+        .history-count { color: #4CAF50; font-size: 12px; font-weight: 500; }
+        .history-delete-btn {
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #666;
+            background: transparent;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .history-delete-btn:hover { background: #ffebee; color: #d32f2f; border-color: #ffcdd2; }
+        .no-history { padding: 30px; text-align: center; color: #999; }
     </style>
 </head>
 <body>
@@ -172,13 +279,30 @@
         <div class="hint">
             Tip: Use double quotes for phrase search (e.g., "hong kong"). Max 50 results displayed.
         </div>
+        <!-- 历史查询标签区 -->
+        <div id="historyChips" class="history-chips-container"></div>
     </div>
 
     <div id="results"></div>
 </div>
 
+<!-- 历史记录全局面板 -->
+<div id="historyBackdrop" class="history-backdrop" style="display:none;" onclick="toggleFullHistory()"></div>
+<div id="fullHistoryPanel" class="full-history-panel" style="display:none;">
+    <div class="panel-header">
+        <h3>Search History</h3>
+        <div class="panel-actions">
+            <button onclick="clearAllHistory()" class="btn-secondary btn-danger">Clear All</button>
+            <button onclick="toggleFullHistory()" class="btn-secondary">Close</button>
+        </div>
+    </div>
+    <div id="fullHistoryList" class="full-history-list"></div>
+</div>
+
 <script>
     const API_BASE = 'http://localhost:8080';
+    const HISTORY_KEY = 'csit5930_search_history';
+    const MAX_HISTORY_ITEMS = 10;
 
     document.getElementById('queryInput').addEventListener('keypress', function(e) {
         if (e.key === 'Enter') performSearch();
@@ -200,8 +324,18 @@
 
         try {
             const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}&limit=50`);
-            const data = await response.json();
+            let data = await response.json();
+
+            // 兼容后端未返回 query 字段的情况
+            if (data && !data.query) {
+                data.query = query;
+            }
+
             const elapsedSeconds = (performance.now() - startTime) / 1000;
+
+            // 保存到历史记录（去重：同查询只保留最新一次）
+            saveSearchToHistory(query, data, elapsedSeconds);
+
             displayResults(data, elapsedSeconds);
         } catch (error) {
             resultsDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
@@ -213,7 +347,7 @@
     function displayResults(data, elapsedSeconds) {
         const container = document.getElementById('results');
 
-        if (data.results.length === 0) {
+        if (!data.results || data.results.length === 0) {
             container.innerHTML = '<div class="no-results">No results found</div>';
             return;
         }
@@ -288,6 +422,143 @@
         div.textContent = text;
         return div.innerHTML;
     }
+
+    /* ==================== Query History Management ==================== */
+
+    function getHistory() {
+        try {
+            return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveSearchToHistory(query, data, elapsedSeconds) {
+        if (!query || !data) return;
+
+        // 确保存储的结果数据包含 query 字段，供 displayResults 恢复时使用
+        const resultsToStore = (data.query) ? data : { ...data, query: query };
+
+        let history = getHistory();
+
+        // 去重：移除旧有的相同查询
+        history = history.filter(h => h.query !== query);
+
+        history.unshift({
+            query,
+            timestamp: Date.now(),
+            results: resultsToStore,
+            elapsedSeconds
+        });
+
+        if (history.length > MAX_HISTORY_ITEMS) {
+            history.pop();
+        }
+
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const container = document.getElementById('historyChips');
+        const history = getHistory();
+
+        if (history.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+
+        let html = '<div class="history-label">Recent queries:</div><div class="chips-wrapper">';
+        history.slice(0, 5).forEach((item, idx) => {
+            const timeStr = new Date(item.timestamp).toLocaleTimeString();
+            html += `<span class="history-chip" onclick="restoreHistory(${idx})" title="Searched at ${timeStr}">
+                ${escapeHtml(item.query)}
+                <span class="chip-delete" onclick="event.stopPropagation(); deleteHistoryItem(${idx})">×</span>
+            </span>`;
+        });
+
+        if (history.length > 5) {
+            html += `<span class="history-chip history-more" onclick="toggleFullHistory()" title="View all history">+${history.length - 5} more…</span>`;
+        }
+        html += '</div>';
+
+        container.innerHTML = html;
+    }
+
+    // 从历史记录直接恢复结果（不重新请求后端）
+    function restoreHistory(index) {
+        const history = getHistory();
+        const item = history[index];
+        if (!item || !item.results) return;
+
+        document.getElementById('queryInput').value = item.query;
+        document.body.classList.add('search-active');
+        displayResults(item.results, item.elapsedSeconds);
+    }
+
+    function deleteHistoryItem(index) {
+        let history = getHistory();
+        history.splice(index, 1);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        renderHistory();
+
+        // 如果全局面板正打开，刷新列表
+        if (document.getElementById('fullHistoryPanel').style.display !== 'none') {
+            renderFullHistoryList();
+        }
+    }
+
+    function clearAllHistory() {
+        if (!confirm('Clear all search history?')) return;
+        localStorage.removeItem(HISTORY_KEY);
+        renderHistory();
+        document.getElementById('fullHistoryPanel').style.display = 'none';
+        document.getElementById('historyBackdrop').style.display = 'none';
+    }
+
+    function toggleFullHistory() {
+        const panel = document.getElementById('fullHistoryPanel');
+        const backdrop = document.getElementById('historyBackdrop');
+
+        if (panel.style.display === 'none') {
+            renderFullHistoryList();
+            backdrop.style.display = 'block';
+            panel.style.display = 'flex';
+        } else {
+            panel.style.display = 'none';
+            backdrop.style.display = 'none';
+        }
+    }
+
+    function renderFullHistoryList() {
+        const list = document.getElementById('fullHistoryList');
+        const history = getHistory();
+
+        if (history.length === 0) {
+            list.innerHTML = '<div class="no-history">No history yet</div>';
+            return;
+        }
+
+        let html = '';
+        history.forEach((item, idx) => {
+            const date = new Date(item.timestamp).toLocaleString();
+            const resultCount = item.results?.results?.length || 0;
+            html += `
+                <div class="history-row" onclick="restoreHistory(${idx})">
+                    <div class="history-meta">
+                        <span class="history-query">${escapeHtml(item.query)}</span>
+                        <span class="history-time">${date}</span>
+                        <span class="history-count">${resultCount} results</span>
+                    </div>
+                    <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${idx})">Delete</button>
+                </div>
+            `;
+        });
+        list.innerHTML = html;
+    }
+
+    // 页面加载时渲染历史记录
+    renderHistory();
 </script>
 </body>
 </html>
