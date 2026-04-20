@@ -41,90 +41,111 @@ public class SearchServer {
             exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
             exchange.getResponseHeaders().add("Content-Type", "application/json; charset=UTF-8");
 
-            String query = "";
-            int limit = 50;
+            try {
+                String query = "";
+                int limit = 50;
+                boolean useSynonyms = false;
 
-            String rawQuery = exchange.getRequestURI().getRawQuery();
-            if (rawQuery != null) {
-                String[] pairs = rawQuery.split("&");
-                for (String pair : pairs) {
-                    int idx = pair.indexOf("=");
-                    if (idx > 0) {
-                        String key = URLDecoder.decode(pair.substring(0, idx), "UTF-8");
-                        String value = URLDecoder.decode(pair.substring(idx + 1), "UTF-8");
-                        if (key.equals("q")) query = value;
-                        else if (key.equals("limit")) {
-                            try { limit = Math.min(50, Math.max(1, Integer.parseInt(value))); }
-                            catch (NumberFormatException ignored) {}
+                String rawQuery = exchange.getRequestURI().getRawQuery();
+                if (rawQuery != null) {
+                    String[] pairs = rawQuery.split("&");
+                    for (String pair : pairs) {
+                        int idx = pair.indexOf("=");
+                        if (idx > 0) {
+                            String key = URLDecoder.decode(pair.substring(0, idx), "UTF-8");
+                            String value = URLDecoder.decode(pair.substring(idx + 1), "UTF-8");
+                            switch (key) {
+                                case "q":
+                                    query = value;
+                                    break;
+                                case "limit":
+                                    try {
+                                        limit = Math.min(50, Math.max(1, Integer.parseInt(value)));
+                                    } catch (NumberFormatException ignored) {
+                                    }
+                                    break;
+                                case "synonyms":
+                                    useSynonyms = value.equals("true") || value.equals("1");
+                                    break;
+                            }
                         }
                     }
                 }
-            }
 
-            StringBuilder json = new StringBuilder();
-            json.append("{\n");
-            json.append("  \"query\": \"").append(escapeJson(query)).append("\",\n");
-            json.append("  \"results\": [\n");
+                retriever.setEnableSynonymExpansion(useSynonyms);
 
-            if (!query.isEmpty()) {
-                List<Retriever.SearchResult> results = retriever.search(query);
-                int count = Math.min(limit, results.size());
+                StringBuilder json = new StringBuilder();
+                json.append("{\n");
+                json.append("  \"query\": \"").append(escapeJson(query)).append("\",\n");
+                json.append("  \"results\": [\n");
 
-                for (int i = 0; i < count; i++) {
-                    Retriever.SearchResult r = results.get(i);
-                    if (i > 0) json.append(",\n");
+                if (!query.isEmpty()) {
+                    List<Retriever.SearchResult> results = retriever.search(query);
+                    int count = Math.min(limit, results.size());
 
-                    json.append("    {\n");
-                    json.append("      \"docId\": ").append(r.docId).append(",\n");
-                    json.append("      \"score\": ").append(String.format("%.4f", r.score)).append(",\n");
-                    json.append("      \"title\": \"").append(escapeJson(r.title)).append("\",\n");
-                    json.append("      \"url\": \"").append(escapeJson(r.url)).append("\",\n");
-                    json.append("      \"lastModified\": \"").append(escapeJson(
-                            r.lastModified > 0 ? dateFormat.format(new java.util.Date(r.lastModified)) : "Unknown"
-                    )).append("\",\n");
-                    json.append("      \"size\": ").append(r.size).append(",\n");
+                    for (int i = 0; i < count; i++) {
+                        Retriever.SearchResult r = results.get(i);
+                        if (i > 0) json.append(",\n");
 
-                    json.append("      \"keywords\": [\n");
-                    int kwCount = 0;
-                    for (Map.Entry<String, Integer> kw : r.topKeywords) {
-                        if (kwCount > 0) json.append(",\n");
-                        json.append("        {\"term\": \"").append(escapeJson(kw.getKey()))
-                                .append("\", \"freq\": ").append(kw.getValue()).append("}");
-                        kwCount++;
-                        if (kwCount >= 5) break;
+                        json.append("    {\n");
+                        json.append("      \"docId\": ").append(r.docId).append(",\n");
+                        json.append("      \"score\": ").append(String.format("%.4f", r.score)).append(",\n");
+                        json.append("      \"title\": \"").append(escapeJson(r.title)).append("\",\n");
+                        json.append("      \"url\": \"").append(escapeJson(r.url)).append("\",\n");
+                        json.append("      \"lastModified\": \"").append(escapeJson(
+                                r.lastModified > 0 ? dateFormat.format(new java.util.Date(r.lastModified)) : "Unknown"
+                        )).append("\",\n");
+                        json.append("      \"size\": ").append(r.size).append(",\n");
+
+                        json.append("      \"keywords\": [\n");
+                        int kwCount = 0;
+                        for (Map.Entry<String, Integer> kw : r.topKeywords) {
+                            if (kwCount > 0) json.append(",\n");
+                            json.append("        {\"term\": \"").append(escapeJson(kw.getKey()))
+                                    .append("\", \"freq\": ").append(kw.getValue()).append("}");
+                            kwCount++;
+                            if (kwCount >= 5) break;
+                        }
+                        json.append("\n      ],\n");
+
+                        if (r.parentId != -1) {
+                            String pUrl = retriever.getPageUrl(r.parentId);
+                            String pTitle = retriever.getPageTitle(r.parentId);
+                            json.append("      \"parent\": {\"url\": \"").append(escapeJson(pUrl))
+                                    .append("\", \"title\": \"").append(escapeJson(pTitle)).append("\"},\n");
+                        } else {
+                            json.append("      \"parent\": null,\n");
+                        }
+
+                        json.append("      \"children\": [");
+                        for (int j = 0; j < r.childrenIds.size(); j++) {
+                            if (j > 0) json.append(", ");
+                            int childId = r.childrenIds.get(j);
+                            String cUrl = retriever.getPageUrl(childId);
+                            String cTitle = retriever.getPageTitle(childId);
+                            json.append("{\"url\": \"").append(escapeJson(cUrl))
+                                    .append("\", \"title\": \"").append(escapeJson(cTitle)).append("\"}");
+                        }
+                        json.append("]\n");
+
+                        json.append("    }");
                     }
-                    json.append("\n      ],\n");
-
-                    if (r.parentId != -1) {
-                        String pUrl = retriever.getPageUrl(r.parentId);
-                        String pTitle = retriever.getPageTitle(r.parentId);
-                        json.append("      \"parent\": {\"url\": \"").append(escapeJson(pUrl))
-                                .append("\", \"title\": \"").append(escapeJson(pTitle)).append("\"},\n");
-                    } else {
-                        json.append("      \"parent\": null,\n");
-                    }
-
-                    json.append("      \"children\": [");
-                    for (int j = 0; j < r.childrenIds.size(); j++) {
-                        if (j > 0) json.append(", ");
-                        int childId = r.childrenIds.get(j);
-                        String cUrl = retriever.getPageUrl(childId);
-                        String cTitle = retriever.getPageTitle(childId);
-                        json.append("{\"url\": \"").append(escapeJson(cUrl))
-                                .append("\", \"title\": \"").append(escapeJson(cTitle)).append("\"}");
-                    }
-                    json.append("]\n");
-
-                    json.append("    }");
                 }
-            }
 
-            json.append("\n  ]\n}");
+                json.append("\n  ]\n}");
 
-            byte[] response = json.toString().getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, response.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(response);
+                byte[] response = json.toString().getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, response.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(response);
+                }
+            } catch (Exception e) {
+                String errJson = "{\"error\":\"Search failed\"}";
+                byte[] response = errJson.getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(500, response.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(response);
+                }
             }
         }
 

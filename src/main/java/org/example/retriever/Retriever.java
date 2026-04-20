@@ -21,6 +21,8 @@ public class Retriever {
     private final int totalDocuments;
     private static final double TITLE_BOOST = 3.0;
     private static final int MAX_RESULTS = 50;
+    private static final double SYNONYM_TERM_WEIGHT = 0.2;
+    private static final double SYNONYM_PHRASE_BOOST_MULTIPLIER = 0.3;
 
     public enum SimilarityMetric {
         COSINE,
@@ -32,6 +34,8 @@ public class Retriever {
     private final Map<Integer, Double> bodyDocNorms;
     private final Map<Integer, Double> titleDocNorms;
     private SimilarityMetric similarityMetric = SimilarityMetric.COSINE;
+    private final Map<String, Set<String>> synonymDictionary;
+    private boolean enableSynonymExpansion = false;
 
     private static class PageInfo {
         String url;
@@ -101,13 +105,15 @@ public class Retriever {
         this.tokenPattern = Pattern.compile("[^a-z0-9]+");
         this.totalDocuments = 300;
         this.pageInfoCache = new HashMap<>();
+        this.synonymDictionary = new HashMap<>();
         this.bodyDocNorms = buildDocumentNorms(this.bodyIndex);
         this.titleDocNorms = buildDocumentNorms(this.titleIndex);
+        loadSynonyms();
         loadPageInfo();
     }
 
-    public void setSimilarityMetric(SimilarityMetric similarityMetric) {
-        this.similarityMetric = similarityMetric == null ? SimilarityMetric.COSINE : similarityMetric;
+    public void setEnableSynonymExpansion(boolean enable) {
+        this.enableSynonymExpansion = enable;
     }
 
     private void loadPageInfo() {
@@ -153,7 +159,7 @@ public class Retriever {
                                         lastModified = htmlFile.lastModified();
                                     }
                                 } else if (cl.startsWith("Size:")) {
-                                    // ★ 读取爬虫记录的原始网页字节数
+                                    // ★ 读取爬虫记录的原始网页���节数
                                     try {
                                         size = Integer.parseInt(cl.substring("Size:".length()).trim());
                                     } catch (NumberFormatException ignored) {}
@@ -217,22 +223,19 @@ public class Retriever {
             }
 
             String phrase = phraseMatcher.group(1).toLowerCase();
-            List<String> phraseTerms = new ArrayList<>();
-            String[] phraseTokens = tokenPattern.split(phrase);
-            for (String token : phraseTokens) {
-                if (!token.isEmpty() && !stopStem.isStopWord(token)) {
-                    String stemmed = stopStem.stem(token);
-                    if (stemmed != null && !stemmed.isEmpty()) {
-                        phraseTerms.add(stemmed);
-                        if (!terms.contains(stemmed)) {
-                            terms.add(stemmed);
-                        }
+            List<String> phraseTerms = tokenizePhraseWithStopwords(phrase);
+            int phraseNonStopCount = 0;
+            for (String term : phraseTerms) {
+                if (term != null && !term.isEmpty()) {
+                    phraseNonStopCount++;
+                    if (!terms.contains(term)) {
+                        terms.add(term);
                     }
                 }
             }
-            if (!phraseTerms.isEmpty()) {
+            if (!phraseTerms.isEmpty() && phraseNonStopCount > 0) {
                 phrases.add(phraseTerms);
-                phrasePositions.add(terms.size() - phraseTerms.size());
+                phrasePositions.add(terms.size() - phraseNonStopCount);
             }
 
             remaining = remaining.substring(phraseMatcher.end());
@@ -252,6 +255,48 @@ public class Retriever {
         }
 
         return new ParsedQuery(terms, phrases, phrasePositions);
+    }
+
+    private List<String> tokenizePhraseWithStopwords(String phrase) {
+        List<String> phraseTerms = new ArrayList<>();
+        String[] phraseTokens = tokenPattern.split(phrase.toLowerCase());
+        for (String token : phraseTokens) {
+            if (token.isEmpty()) {
+                continue;
+            }
+            if (stopStem.isStopWord(token)) {
+                phraseTerms.add("");
+                continue;
+            }
+            String stemmed = stopStem.stem(token);
+            if (stemmed != null && !stemmed.isEmpty()) {
+                phraseTerms.add(stemmed);
+            } else {
+                phraseTerms.add("");
+            }
+        }
+        return phraseTerms;
+    }
+
+    private void addSynonymPhrase(String phrase, ParsedQuery query,
+                                  List<String> expandedTerms,
+                                  Map<String, Boolean> isSynonym) {
+        List<String> phraseTerms = tokenizePhraseWithStopwords(phrase);
+        if (phraseTerms.isEmpty()) {
+            return;
+        }
+        query.phrases.add(phraseTerms);
+        query.phrasePositions.add(query.terms.size());
+        // Add non-stopword terms for recall, but keep them synonym-weighted.
+        for (String term : phraseTerms) {
+            if (term == null || term.isEmpty()) {
+                continue;
+            }
+            if (!expandedTerms.contains(term)) {
+                expandedTerms.add(term);
+            }
+            isSynonym.put(term, true);
+        }
     }
 
     private Map<String, Integer> getDocumentFrequency(List<String> terms) {
@@ -306,9 +351,26 @@ public class Retriever {
 
     private boolean checkPhraseMatch(int docId, List<String> phraseTerms, boolean isTitle) {
         InvertedIndex index = isTitle ? titleIndex : bodyIndex;
-        List<List<Integer>> positionsList = new ArrayList<>();
+        List<String> terms = new ArrayList<>();
+        List<Integer> offsets = new ArrayList<>();
 
+        int offset = 0;
         for (String term : phraseTerms) {
+            if (term == null || term.isEmpty()) {
+                offset++;
+                continue;
+            }
+            terms.add(term);
+            offsets.add(offset);
+            offset++;
+        }
+
+        if (terms.isEmpty()) {
+            return false;
+        }
+
+        List<List<Integer>> positionsList = new ArrayList<>();
+        for (String term : terms) {
             try {
                 PostingList postings = (PostingList) index.getHTree().get(term);
                 if (postings == null) return false;
@@ -326,17 +388,19 @@ public class Retriever {
             }
         }
 
-        if (positionsList.isEmpty() || phraseTerms.size() != positionsList.size()) {
+        if (positionsList.isEmpty() || terms.size() != positionsList.size()) {
             return false;
         }
 
         List<Integer> basePositions = positionsList.get(0);
+        int baseOffset = offsets.get(0);
         for (int i = 1; i < positionsList.size(); i++) {
             List<Integer> currentPositions = positionsList.get(i);
+            int delta = offsets.get(i) - baseOffset;
             List<Integer> newBase = new ArrayList<>();
             for (int pos1 : basePositions) {
                 for (int pos2 : currentPositions) {
-                    if (pos2 == pos1 + i) {
+                    if (pos2 == pos1 + delta) {
                         newBase.add(pos2);
                         break;
                     }
@@ -471,11 +535,57 @@ public class Retriever {
         return vectors;
     }
 
+    private String phraseKey(List<String> phraseTerms) {
+        StringBuilder sb = new StringBuilder();
+        for (String term : phraseTerms) {
+            if (term == null || term.isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(" ");
+            }
+            sb.append(term);
+        }
+        return sb.toString();
+    }
+
+    private Set<Integer> collectPhraseCandidateDocs(List<String> phraseTerms, boolean isTitle) {
+        InvertedIndex index = isTitle ? titleIndex : bodyIndex;
+        Set<Integer> candidates = null;
+        for (String term : phraseTerms) {
+            if (term == null || term.isEmpty()) {
+                continue;
+            }
+            try {
+                PostingList postings = (PostingList) index.getHTree().get(term);
+                if (postings == null || postings.postings.isEmpty()) {
+                    return Collections.emptySet();
+                }
+                Set<Integer> docIds = new HashSet<>();
+                for (Posting p : postings.postings) {
+                    docIds.add(p.docId);
+                }
+                if (candidates == null) {
+                    candidates = docIds;
+                } else {
+                    candidates.retainAll(docIds);
+                    if (candidates.isEmpty()) {
+                        return Collections.emptySet();
+                    }
+                }
+            } catch (IOException e) {
+                return Collections.emptySet();
+            }
+        }
+        return candidates == null ? Collections.emptySet() : candidates;
+    }
+
     private double calculateDocumentScore(int docId, ParsedQuery query,
                                           Map<String, Double> queryWeights,
                                           Map<Integer, Map<String, Double>> titleVectors,
                                           Map<Integer, Map<String, Double>> bodyVectors,
-                                          SimilarityMetric metric) {
+                                          SimilarityMetric metric,
+                                          Set<String> synonymPhraseKeys) {
         Map<String, Double> titleDocWeights = titleVectors.getOrDefault(docId, Collections.emptyMap());
         Map<String, Double> bodyDocWeights = bodyVectors.getOrDefault(docId, Collections.emptyMap());
 
@@ -511,6 +621,11 @@ public class Retriever {
             if (titleMatch) phraseBoost += 0.5;
             if (bodyMatch) phraseBoost += 0.25;
 
+            String key = phraseKey(phrase);
+            if (synonymPhraseKeys.contains(key)) {
+                phraseBoost *= SYNONYM_PHRASE_BOOST_MULTIPLIER;
+            }
+
             // Phrase matches act as a multiplicative boost after similarity calculation.
             if (phraseBoost > 0) {
                 score *= (1.0 + phraseBoost);
@@ -520,35 +635,141 @@ public class Retriever {
         return score;
     }
 
+    private List<String> extractRawTokens(String query) {
+        List<String> tokens = new ArrayList<>();
+        String[] parts = tokenPattern.split(query.toLowerCase());
+        for (String token : parts) {
+            if (!token.isEmpty()) {
+                tokens.add(token);
+            }
+        }
+        return tokens;
+    }
+
+    private void mergeSynonymFlag(Map<String, Boolean> isSynonym, String stem, boolean synonym) {
+        Boolean existing = isSynonym.get(stem);
+        if (existing == null) {
+            isSynonym.put(stem, synonym);
+            return;
+        }
+        if (!existing) {
+            return; // keep original term flag when both original and synonym map to same stem
+        }
+        if (!synonym) {
+            isSynonym.put(stem, false);
+        }
+    }
+
     public List<SearchResult> search(String queryString) {
         return search(queryString, this.similarityMetric);
     }
 
     public List<SearchResult> search(String queryString, SimilarityMetric metric) {
         ParsedQuery query = parseQuery(queryString);
-        if (query.terms.isEmpty()) {
+        List<String> rawTokens = extractRawTokens(queryString);
+        if (query.terms.isEmpty() && rawTokens.isEmpty()) {
             return new ArrayList<>();
         }
 
-        Map<String, Integer> df = getDocumentFrequency(query.terms);
+        // Synonym expansion on raw tokens before stemming
+        List<String> expandedRawTokens = new ArrayList<>();
+        Map<String, Boolean> rawIsSynonym = new HashMap<>();
+        for (String token : rawTokens) {
+            if (!expandedRawTokens.contains(token)) {
+                expandedRawTokens.add(token);
+            }
+            rawIsSynonym.put(token, false);
+        }
 
-        Map<Integer, Map<String, Double>> titleVectors = buildDocumentVectors(query.terms, true);
-        Map<Integer, Map<String, Double>> bodyVectors = buildDocumentVectors(query.terms, false);
+        List<String> addedSynonymTerms = new ArrayList<>();
+        List<String> addedSynonymPhrases = new ArrayList<>();
+        Set<String> synonymPhraseKeys = new HashSet<>();
+
+        if (enableSynonymExpansion) {
+            for (String token : rawTokens) {
+                Set<String> synonyms = getSynonyms(token);
+                if (!synonyms.isEmpty()) {
+                    System.out.println("Synonyms for '" + token + "': " + synonyms);
+                }
+                for (String syn : synonyms) {
+                    if (syn.contains(" ")) {
+                        // Treat multi-word synonyms as quoted phrases.
+                        addSynonymPhrase(syn, query, new ArrayList<String>(), new HashMap<String, Boolean>());
+                        if (!addedSynonymPhrases.contains(syn)) {
+                            addedSynonymPhrases.add(syn);
+                        }
+                        List<String> keyTerms = tokenizePhraseWithStopwords(syn);
+                        synonymPhraseKeys.add(phraseKey(keyTerms));
+                        continue;
+                    }
+                    if (!expandedRawTokens.contains(syn)) {
+                        expandedRawTokens.add(syn);
+                        rawIsSynonym.put(syn, true);
+                        addedSynonymTerms.add(syn);
+                    }
+                }
+            }
+        }
+
+        if (enableSynonymExpansion && (!addedSynonymTerms.isEmpty() || !addedSynonymPhrases.isEmpty())) {
+            StringBuilder expandedQuery = new StringBuilder(queryString);
+            for (String term : addedSynonymTerms) {
+                expandedQuery.append(" ").append(term);
+            }
+            for (String phrase : addedSynonymPhrases) {
+                expandedQuery.append(" \"").append(phrase).append("\"");
+            }
+            System.out.println("Expanded query: " + expandedQuery.toString());
+        }
+
+        // Stem after expansion and filter stopwords
+        List<String> expandedTerms = new ArrayList<>();
+        Map<String, Boolean> isSynonym = new HashMap<>();
+        for (String token : expandedRawTokens) {
+            if (stopStem.isStopWord(token)) {
+                continue;
+            }
+            String stemmed = stopStem.stem(token);
+            if (stemmed == null || stemmed.isEmpty()) {
+                continue;
+            }
+            if (!expandedTerms.contains(stemmed)) {
+                expandedTerms.add(stemmed);
+            }
+            mergeSynonymFlag(isSynonym, stemmed, rawIsSynonym.getOrDefault(token, false));
+        }
+
+        if (expandedTerms.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Map<String, Integer> df = getDocumentFrequency(expandedTerms);
+
+        Map<Integer, Map<String, Double>> titleVectors = buildDocumentVectorsWithSynonymWeighting(expandedTerms, true, isSynonym);
+        Map<Integer, Map<String, Double>> bodyVectors = buildDocumentVectorsWithSynonymWeighting(expandedTerms, false, isSynonym);
 
         Set<Integer> candidateDocs = new HashSet<>();
         candidateDocs.addAll(titleVectors.keySet());
         candidateDocs.addAll(bodyVectors.keySet());
 
+        for (List<String> phrase : query.phrases) {
+            candidateDocs.addAll(collectPhraseCandidateDocs(phrase, true));
+            candidateDocs.addAll(collectPhraseCandidateDocs(phrase, false));
+        }
+
         Map<String, Double> queryWeights = new HashMap<>();
-        for (String term : query.terms) {
+        for (String term : expandedTerms) {
             int docFreq = df.getOrDefault(term, 0);
             double idf = calculateIDF(docFreq);
+            if (isSynonym.getOrDefault(term, false)) {
+                idf = idf * SYNONYM_TERM_WEIGHT;
+            }
             queryWeights.put(term, idf);
         }
 
         List<SearchResult> results = new ArrayList<>();
         for (int docId : candidateDocs) {
-            double score = calculateDocumentScore(docId, query, queryWeights, titleVectors, bodyVectors, metric);
+            double score = calculateDocumentScore(docId, query, queryWeights, titleVectors, bodyVectors, metric, synonymPhraseKeys);
             if (score > 0) {
                 PageInfo info = pageInfoCache.get(docId);
                 String url = info != null ? info.url : "page_" + docId + ".html";
@@ -566,6 +787,26 @@ public class Retriever {
 
         Collections.sort(results);
         return results.subList(0, Math.min(MAX_RESULTS, results.size()));
+    }
+
+    private Map<Integer, Map<String, Double>> buildDocumentVectorsWithSynonymWeighting(
+            List<String> terms, boolean isTitle, Map<String, Boolean> isSynonym) {
+        Map<Integer, Map<String, Double>> vectors = new HashMap<>();
+
+        for (String term : terms) {
+            Map<Integer, Double> perDoc = getDocumentTFWeights(term, isTitle);
+            boolean isSyn = isSynonym.getOrDefault(term, false);
+            for (Map.Entry<Integer, Double> entry : perDoc.entrySet()) {
+                Map<String, Double> docVector = vectors.computeIfAbsent(entry.getKey(), k -> new HashMap<>());
+                double weight = entry.getValue();
+                if (isSyn) {
+                    weight = weight * SYNONYM_TERM_WEIGHT;
+                }
+                docVector.put(term, weight);
+            }
+        }
+
+        return vectors;
     }
 
     private List<Map.Entry<String, Integer>> getTopKeywords(int docId) {
@@ -607,6 +848,45 @@ public class Retriever {
     public String getPageTitle(int docId) {
         PageInfo info = pageInfoCache.get(docId);
         return (info != null && info.title != null) ? info.title : "Document " + docId;
+    }
+
+    private void loadSynonyms() {
+        try {
+            String synonymsPath = "src/main/resources/synonyms.txt";
+            List<String> lines = Files.readAllLines(Paths.get(synonymsPath));
+            for (String line : lines) {
+                if (line.trim().isEmpty()) continue;
+                // Each line contains a group of synonyms separated by commas
+                String[] words = line.split(",");
+                // Normalize all words to lowercase and trim whitespace
+                List<String> normalizedWords = new ArrayList<>();
+                for (String word : words) {
+                    String normalized = word.trim().toLowerCase();
+                    if (!normalized.isEmpty()) {
+                        normalizedWords.add(normalized);
+                    }
+                }
+                // For each word, create a mapping to all other words in the group
+                for (String word : normalizedWords) {
+                    Set<String> synonyms = synonymDictionary.computeIfAbsent(word, k -> new HashSet<>());
+                    for (String other : normalizedWords) {
+                        if (!other.equals(word)) {
+                            synonyms.add(other);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: Failed to load synonyms: " + e.getMessage());
+        }
+    }
+
+    private Set<String> getSynonyms(String term) {
+        return synonymDictionary.getOrDefault(term, new HashSet<>());
+    }
+
+    public void setSimilarityMetric(SimilarityMetric similarityMetric) {
+        this.similarityMetric = similarityMetric == null ? SimilarityMetric.COSINE : similarityMetric;
     }
 
     private static void printResults(String query, List<SearchResult> results, int limit) {

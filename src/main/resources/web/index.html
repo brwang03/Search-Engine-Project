@@ -84,6 +84,15 @@
         button:disabled { background-color: #ccc; }
         .hint { margin-top: 8px; color: #666; font-size: 14px; }
         .results-info { margin-bottom: 10px; color: #666; }
+        .hint-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .hint-row .hint { margin-top: 0; }
 
         .result-item {
             background: white;
@@ -199,6 +208,59 @@
         .history-more { background: #f5f5f5; color: #666; font-weight: 500; }
         .history-more:hover { background: #e0e0e0; color: #333; }
 
+        /* Toggle Switch Styles */
+        .toggle-switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .toggle-switch label {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+            user-select: none;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #4CAF50;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
         /* Full History Panel */
         .history-backdrop {
             position: fixed;
@@ -289,11 +351,20 @@
 
     <div class="search-container">
         <div class="search-box">
-            <label for="queryInput"></label><input type="text" id="queryInput" placeholder='Enter search query (e.g., "hong kong" universities)' />
+            <label for="queryInput"></label><input type="text" id="queryInput" placeholder='Enter search query...' />
             <button onclick="performSearch()" id="searchBtn">Search</button>
         </div>
-        <div class="hint">
-            Tip: Use double quotes for phrase search (e.g., "hong kong"). Max 50 results displayed.
+        <div class="hint-row">
+            <div class="hint">
+                Tip: Use double quotes for phrase search (e.g., "hong kong"). Max 50 results displayed.
+            </div>
+            <div class="toggle-switch">
+                <label for="synonymToggle">Synonym Expansion </label>
+                <label class="switch">
+                    <input type="checkbox" id="synonymToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
         <!-- 历史查询标签区 -->
         <div id="historyChips" class="history-chips-container"></div>
@@ -354,6 +425,7 @@
         const btn = document.getElementById('searchBtn');
         const resultsDiv = document.getElementById('results');
         const startTime = performance.now();
+        const useSynonyms = document.getElementById('synonymToggle').checked;
 
         // 切换到搜索后的布局
         document.body.classList.add('search-active');
@@ -362,7 +434,8 @@
         resultsDiv.innerHTML = '<div id="loading">Searching...</div>';
 
         try {
-            const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}&limit=50`);
+            const queryParams = `q=${encodeURIComponent(query)}&limit=50&synonyms=${useSynonyms ? 'true' : 'false'}`;
+            const response = await fetch(`${API_BASE}/api/search?${queryParams}`);
             let data = await response.json();
 
             // 兼容后端未返回 query 字段的情况
