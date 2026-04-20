@@ -59,7 +59,10 @@
             width: 900px;
             margin-bottom: 20px;
         }
-        .search-box { display: flex; gap: 10px; }
+        .search-box {
+            display: flex;
+            gap: 10px;
+        }
         input[type="text"] {
             flex: 1;
             padding: 12px;
@@ -126,6 +129,8 @@
         .link-item { margin: 3px 0; }
         .link-item a { color: #1a0dab; text-decoration: none; }
         .link-item a:hover { text-decoration: underline; }
+        a.toggle-link { color: #4CAF50 !important; cursor: pointer; text-decoration: underline; }
+        a.toggle-link:hover { color: #45a049 !important; }
         .no-results { text-align: center; color: #666; padding: 40px; }
         .error {
             color: #d32f2f;
@@ -239,6 +244,17 @@
         .btn-danger { color: #d32f2f; border-color: #ffcdd2; }
         .btn-danger:hover { background: #ffebee; }
         .full-history-list { overflow-y: auto; padding: 0; }
+        .similar-btn {
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #4CAF50;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .similar-btn:hover { background: #45a049; }
         .history-row {
             padding: 14px 20px;
             border-bottom: 1px solid #f0f0f0;
@@ -303,6 +319,29 @@
     const API_BASE = 'http://localhost:8080';
     const HISTORY_KEY = 'csit5930_search_history';
     const MAX_HISTORY_ITEMS = 10;
+    const DEFAULT_STOP_WORDS = [
+         'a','an','and','are','as','at','be','by','for','from','has','he','in','is','it','its','of','on','that',
+         'the','to','was','were','will','with','or','this','these','those','you','your','we','our','they','their',
+         'i','me','my','mine','us','them','him','her','his','hers','what','which','who','whom','why','how','not'
+    ];
+    const STOP_WORDS = new Set(DEFAULT_STOP_WORDS);
+    let lastResults = [];
+    let lastQuery = '';
+
+    async function loadStopWords() {
+        try {
+            const response = await fetch(`${API_BASE}/api/stopwords`);
+            if (!response.ok) return;
+            const text = await response.text();
+            STOP_WORDS.clear();
+            text.split(/\r?\n/)
+                .map(line => line.trim().toLowerCase())
+                .filter(line => line)
+                .forEach(word => STOP_WORDS.add(word));
+        } catch (e) {
+            // Keep default stop words if backend is unavailable.
+        }
+    }
 
     document.getElementById('queryInput').addEventListener('keypress', function(e) {
         if (e.key === 'Enter') performSearch();
@@ -352,10 +391,13 @@
             return;
         }
 
+        lastResults = data.results;
+        lastQuery = data.query || '';
+
         const timeText = Number.isFinite(elapsedSeconds) ? `${elapsedSeconds.toFixed(2)} s` : 'N/A';
         let html = `<div class="results-info">Found ${data.results.length} results for "${escapeHtml(data.query)}" (${timeText})</div>`;
 
-        data.results.forEach(r => {
+        data.results.forEach((r, idx) => {
             const dateStr = r.lastModified && r.lastModified !== 'Unknown'
                 ? r.lastModified
                 : 'Unknown';
@@ -375,13 +417,31 @@
             // Child links: 显示各页面标题，点击跳转实际URL
             let childrenHtml = '<div class="link-item">None</div>';
             if (r.children && r.children.length > 0) {
-                childrenHtml = r.children.map(child =>
+                const visibleChildren = r.children.slice(0, 5).map(child =>
                     `<div class="link-item">
                             <a href="${escapeHtml(child.url)}" target="_blank" rel="noopener noreferrer">
                                 ${escapeHtml(child.title)}
                             </a>
                         </div>`
                 ).join('');
+
+                const hiddenChildren = r.children.slice(5).map(child =>
+                    `<div class="link-item">
+                            <a href="${escapeHtml(child.url)}" target="_blank" rel="noopener noreferrer">
+                                ${escapeHtml(child.title)}
+                            </a>
+                        </div>`
+                ).join('');
+
+                if (hiddenChildren) {
+                    childrenHtml = `${visibleChildren}
+                        <div id="child-more-${idx}" style="display:none;">${hiddenChildren}</div>
+                        <div class="link-item">
+                            <a href="#" class="toggle-link" id="child-toggle-${idx}" onclick="toggleChildren(${idx}); return false;">Show more</a>
+                        </div>`;
+                } else {
+                    childrenHtml = visibleChildren;
+                }
             }
 
             html += `
@@ -409,11 +469,49 @@
                             <div class="links-label">Child Links:</div>
                             <div class="link-list">${childrenHtml}</div>
                         </div>
+
+                        <button class="similar-btn" onclick="searchSimilar(${idx})">Get similar pages</button>
                     </div>
                 `;
         });
 
         container.innerHTML = html;
+    }
+
+    function searchSimilar(index) {
+        const result = lastResults[index];
+        if (!result) return;
+        const topTerms = extractTopKeywords(result, 5);
+        const revised = rewriteQuery(lastQuery, topTerms);
+        if (!revised) return;
+        document.getElementById('queryInput').value = revised;
+        performSearch();
+    }
+
+    function toggleChildren(index) {
+        const more = document.getElementById(`child-more-${index}`);
+        const toggle = document.getElementById(`child-toggle-${index}`);
+        if (!more || !toggle) return;
+        const isHidden = more.style.display === 'none';
+        more.style.display = isHidden ? 'block' : 'none';
+        toggle.textContent = isHidden ? 'Show less' : 'Show more';
+    }
+
+    function extractTopKeywords(result, limit) {
+        if (!result || !Array.isArray(result.keywords)) return [];
+        const filtered = result.keywords
+            .map(k => ({ term: (k.term || '').toLowerCase(), freq: k.freq || 0 }))
+            .filter(k => k.term && !STOP_WORDS.has(k.term));
+        filtered.sort((a, b) => b.freq - a.freq);
+        return filtered.slice(0, limit).map(k => k.term);
+    }
+
+    function rewriteQuery(original, terms) {
+        const cleaned = terms.filter(t => t && !STOP_WORDS.has(t));
+        if (cleaned.length === 0) {
+            return original || '';
+        }
+        return cleaned.join(' ');
     }
 
     function escapeHtml(text) {
@@ -559,6 +657,8 @@
 
     // 页面加载时渲染历史记录
     renderHistory();
+    loadStopWords();
 </script>
 </body>
 </html>
+

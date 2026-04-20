@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Paths;
 
 public class SearchServer {
     private static final int PORT = 8080;
@@ -26,6 +27,7 @@ public class SearchServer {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/api/search", new SearchHandler());
+        server.createContext("/api/stopwords", new StopwordsHandler());
         server.createContext("/view", new ViewHandler());
         server.createContext("/", new StaticFileHandler());
         server.setExecutor(null);
@@ -199,6 +201,29 @@ public class SearchServer {
                 try (OutputStream os = exchange.getResponseBody()) {
                     os.write(notFound.getBytes());
                 }
+            }
+        }
+    }
+
+    static class StopwordsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+            exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=UTF-8");
+
+            String stopwordsPath = "src/main/resources/stopwords.txt";
+            byte[] content;
+            try {
+                content = Files.readAllBytes(Paths.get(stopwordsPath));
+                exchange.sendResponseHeaders(200, content.length);
+            } catch (IOException e) {
+                String msg = "Failed to load stopwords";
+                content = msg.getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(500, content.length);
+            }
+
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(content);
             }
         }
     }
