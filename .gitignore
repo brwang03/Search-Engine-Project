@@ -4,6 +4,7 @@ target/
 !**/src/test/**/target/
 
 # Local toolchains (do not commit)
+.idea/
 .maven/
 .jdk/
 lib/

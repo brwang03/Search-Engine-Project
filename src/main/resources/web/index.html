@@ -63,6 +63,10 @@
             display: flex;
             gap: 10px;
         }
+        .search-btn {
+            width: 120px;
+            flex-shrink: 0;
+        }
         input[type="text"] {
             flex: 1;
             padding: 12px;
@@ -100,8 +104,15 @@
         }
         .keyword-browser-row {
             display: flex;
-            gap: 8px;
+            gap: 10px;
             align-items: center;
+        }
+        .keyword-browser-row .btn-secondary {
+            width: 55px;
+            padding-left: 0;
+            padding-right: 0;
+            text-align: center;
+            flex-shrink: 0;
         }
         #keywordFilter {
             flex: 1;
@@ -265,7 +276,7 @@
             display: inline-flex;
             align-items: center;
             gap: 10px;
-            margin-top: 10px;
+            margin-top: 0;
         }
         .toggle-switch label {
             font-size: 14px;
@@ -409,8 +420,8 @@
 
     <div class="search-container">
         <div class="search-box">
-            <label for="queryInput"></label><input type="text" id="queryInput" placeholder='Enter search query...' />
-            <button onclick="performSearch()" id="searchBtn">Search</button>
+            <input type="text" id="queryInput" aria-label="Search query" placeholder='Enter search query...' />
+            <button onclick="performSearch()" class="search-btn" id="searchBtn">Search</button>
         </div>
         <div class="hint-row">
             <div class="hint">

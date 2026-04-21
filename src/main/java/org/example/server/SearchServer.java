@@ -169,14 +169,22 @@ public class SearchServer {
                     if (idx > 0) {
                         String key = URLDecoder.decode(pair.substring(0, idx), "UTF-8");
                         String value = URLDecoder.decode(pair.substring(idx + 1), "UTF-8");
-                        if (key.equals("prefix")) {
-                            prefix = value;
-                        } else if (key.equals("offset")) {
-                            try { offset = Math.max(0, Integer.parseInt(value)); }
-                            catch (NumberFormatException ignored) {}
-                        } else if (key.equals("limit")) {
-                            try { limit = Math.min(200, Math.max(1, Integer.parseInt(value))); }
-                            catch (NumberFormatException ignored) {}
+                        switch (key) {
+                            case "prefix":
+                                prefix = value;
+                                break;
+                            case "offset":
+                                try {
+                                    offset = Math.max(0, Integer.parseInt(value));
+                                } catch (NumberFormatException ignored) {
+                                }
+                                break;
+                            case "limit":
+                                try {
+                                    limit = Math.min(200, Math.max(1, Integer.parseInt(value)));
+                                } catch (NumberFormatException ignored) {
+                                }
+                                break;
                         }
                     }
                 }
