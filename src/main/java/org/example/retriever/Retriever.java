@@ -225,7 +225,7 @@ public class Retriever {
                                         lastModified = htmlFile.lastModified();
                                     }
                                 } else if (cl.startsWith("Size:")) {
-                                    // ★ 读取爬虫记录的原始网页���节数
+                                    // 读取爬虫记录的原始网页字节数
                                     try {
                                         size = Integer.parseInt(cl.substring("Size:".length()).trim());
                                     } catch (NumberFormatException ignored) {}
@@ -454,7 +454,7 @@ public class Retriever {
             }
         }
 
-        if (positionsList.isEmpty() || terms.size() != positionsList.size()) {
+        if (terms.size() != positionsList.size()) {
             return false;
         }
 
@@ -760,7 +760,7 @@ public class Retriever {
                 for (String syn : synonyms) {
                     if (syn.contains(" ")) {
                         // Treat multi-word synonyms as quoted phrases.
-                        addSynonymPhrase(syn, query, new ArrayList<String>(), new HashMap<String, Boolean>());
+                        addSynonymPhrase(syn, query, new ArrayList<>(), new HashMap<>());
                         if (!addedSynonymPhrases.contains(syn)) {
                             addedSynonymPhrases.add(syn);
                         }
@@ -785,7 +785,7 @@ public class Retriever {
             for (String phrase : addedSynonymPhrases) {
                 expandedQuery.append(" \"").append(phrase).append("\"");
             }
-            System.out.println("Expanded query: " + expandedQuery.toString());
+            System.out.println("Expanded query: " + expandedQuery);
         }
 
         // Stem after expansion and filter stopwords
