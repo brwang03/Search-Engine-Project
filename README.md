@@ -25,6 +25,19 @@ JAVA_HOME="$PWD/.jdk/jdk-17.0.14+7" PATH="$PWD/.jdk/jdk-17.0.14+7/bin:$PATH" ./s
 JAVA_HOME="$PWD/.jdk/jdk-17.0.14+7" PATH="$PWD/.jdk/jdk-17.0.14+7/bin:$PATH" ./scripts/mvnw -q dependency:build-classpath -Dmdep.outputFile=target/classpath.txt -Dmdep.pathSeparator=:
 ```
 
+## Spider (Crawl Corpus)
+
+Run:
+
+```bash
+java -cp "target/classes:$(cat target/classpath.txt)" org.example.spider.Spider
+```
+
+This crawls pages (starting from the URL configured in `Spider.main`) and writes:
+
+- `src/main/resources/html_pages/` (crawled HTML pages)
+- `src/main/resources/link_structure.txt` (link graph)
+
 ## CLI (Interactive Search)
 
 Run:

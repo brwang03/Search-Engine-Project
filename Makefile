@@ -1,4 +1,4 @@
-.PHONY: help build classpath test cli server index reindex clean
+.PHONY: help build classpath test cli server spider index reindex clean
 
 MVNW := ./scripts/mvnw
 JAVA := java
@@ -11,6 +11,7 @@ help:
 		"make test       - run mvn test" \
 		"make cli        - run CLI retriever (set CLI_ARGS=...)" \
 		"make server     - start SearchServer on http://localhost:8080/" \
+		"make spider     - crawl pages and write html_pages/ + link_structure.txt" \
 		"make index      - run Indexer (does not delete db/)" \
 		"make reindex    - rm -rf db/ then run Indexer" \
 		"make clean      - mvn clean"
@@ -41,6 +42,10 @@ cli: classpath
 server: classpath
 	@set -e; $(maybe_use_local_jdk) \
 	$(JAVA) -cp "$(CLASSPATH)" org.example.server.SearchServer
+
+spider: classpath
+	@set -e; $(maybe_use_local_jdk) \
+	$(JAVA) -cp "$(CLASSPATH)" org.example.spider.Spider
 
 index: classpath
 	@set -e; $(maybe_use_local_jdk) \
