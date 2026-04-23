@@ -25,7 +25,13 @@ public class SearchServer {
         retriever = new Retriever(stopwordsPath, "bodyIndex", "titleIndex");
         retriever.setSimilarityMetric(Retriever.SimilarityMetric.DICE);
 
-        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
+        HttpServer server = startServer(PORT, retriever);
+        System.out.println("Search server started at http://localhost:" + server.getAddress().getPort());
+    }
+
+    public static HttpServer startServer(int port, Retriever r) throws IOException {
+        retriever = r;
+        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/api/search", new SearchHandler());
         server.createContext("/api/keywords", new KeywordsHandler());
         server.createContext("/api/stopwords", new StopwordsHandler());
@@ -33,7 +39,7 @@ public class SearchServer {
         server.createContext("/", new StaticFileHandler());
         server.setExecutor(null);
         server.start();
-        System.out.println("Search server started at http://localhost:" + PORT);
+        return server;
     }
 
     static class SearchHandler implements HttpHandler {
