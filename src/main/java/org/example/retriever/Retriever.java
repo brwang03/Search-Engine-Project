@@ -372,7 +372,7 @@ public class Retriever {
             try {
                 PostingList postings = (PostingList) bodyIndex.getHTree().get(term);
                 if (postings != null) {
-                    count = postings.postings.size();
+                    count = postings.size();
                 }
             } catch (IOException e) {
                 System.out.println(e.getMessage());
@@ -399,12 +399,12 @@ public class Retriever {
             PostingList postings = (PostingList) index.getHTree().get(term);
             if (postings != null) {
                 int maxTf = 0;
-                for (Posting p : postings.postings) {
+                for (Posting p : postings.allPostings()) {
                     maxTf = Math.max(maxTf, p.freq);
                 }
                 if (maxTf == 0) maxTf = 1;
-                for (Posting p : postings.postings) {
-                    double idf = calculateIDF(postings.postings.size());
+                double idf = calculateIDF(postings.size());
+                for (Posting p : postings.allPostings()) {
                     double weight = calculateTFWeight(p.freq, maxTf, idf);
                     weights.put(p.docId, weights.getOrDefault(p.docId, 0.0) + weight);
                 }
@@ -440,13 +440,7 @@ public class Retriever {
             try {
                 PostingList postings = (PostingList) index.getHTree().get(term);
                 if (postings == null) return false;
-                Posting docPosting = null;
-                for (Posting p : postings.postings) {
-                    if (p.docId == docId) {
-                        docPosting = p;
-                        break;
-                    }
-                }
+                Posting docPosting = postings.getPosting(docId);
                 if (docPosting == null) return false;
                 positionsList.add(new ArrayList<>(docPosting.positions));
             } catch (IOException e) {
@@ -485,20 +479,20 @@ public class Retriever {
             String term;
             while ((term = (String) iter.next()) != null) {
                 PostingList postings = (PostingList) index.getHTree().get(term);
-                if (postings == null || postings.postings.isEmpty()) {
+                if (postings == null || postings.isEmpty()) {
                     continue;
                 }
 
                 int maxTf = 0;
-                for (Posting p : postings.postings) {
+                for (Posting p : postings.allPostings()) {
                     maxTf = Math.max(maxTf, p.freq);
                 }
                 if (maxTf == 0) {
                     maxTf = 1;
                 }
 
-                double idf = calculateIDF(postings.postings.size());
-                for (Posting p : postings.postings) {
+                double idf = calculateIDF(postings.size());
+                for (Posting p : postings.allPostings()) {
                     double weight = calculateTFWeight(p.freq, maxTf, idf);
                     squaredNorms.merge(p.docId, weight * weight, Double::sum);
                 }
@@ -624,17 +618,13 @@ public class Retriever {
             }
             try {
                 PostingList postings = (PostingList) index.getHTree().get(term);
-                if (postings == null || postings.postings.isEmpty()) {
+                if (postings == null || postings.isEmpty()) {
                     return Collections.emptySet();
                 }
-                Set<Integer> docIds = new HashSet<>();
-                for (Posting p : postings.postings) {
-                    docIds.add(p.docId);
-                }
                 if (candidates == null) {
-                    candidates = docIds;
+                    candidates = postings.docIdsSnapshot();
                 } else {
-                    candidates.retainAll(docIds);
+                    candidates.removeIf(docId -> !postings.containsDoc(docId));
                     if (candidates.isEmpty()) {
                         return Collections.emptySet();
                     }
@@ -883,11 +873,9 @@ public class Retriever {
             while ((key = (String) iter.next()) != null) {
                 PostingList postings = (PostingList) bodyIndex.getHTree().get(key);
                 if (postings != null) {
-                    for (Posting p : postings.postings) {
-                        if (p.docId == docId) {
-                            termFreq.put(key, p.freq);
-                            break;
-                        }
+                    Posting posting = postings.getPosting(docId);
+                    if (posting != null) {
+                        termFreq.put(key, posting.freq);
                     }
                 }
             }
