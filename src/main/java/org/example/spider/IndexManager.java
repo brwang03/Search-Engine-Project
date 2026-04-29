@@ -1,7 +1,5 @@
 package org.example.spider;
 
-import org.example.spider.PageData;
-
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -32,11 +30,7 @@ public class IndexManager {
             return true;
         }
 
-        if (lastModified > existingPage.getLastModified()) {
-            return true;
-        }
-
-        return false;
+        return lastModified > existingPage.getLastModified();
     }
 
     public synchronized PageData addOrUpdatePage(String url, int parentId, long lastModified) {
@@ -75,7 +69,6 @@ public class IndexManager {
         }
     }
 
-    // ★ 新增：获取所有已索引的页面
     public Collection<PageData> getAllPages() {
         return idToPageMap.values();
     }

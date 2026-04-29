@@ -101,17 +101,12 @@ public class Spider {
                     }
                 }
 
-                Thread.sleep(100);
-
             } catch (IOException e) {
                 System.err.println("Error fetching: " + currentUrl + " - " + e.getMessage());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
             }
         }
 
-        // ★ 新增：爬取完成后重新保存所有页面，确保 Children-IDs 完整
+        // Save all pages after crawling, ensure the completeness of Children-IDs
         System.out.println("\nRe-saving all pages with complete child information...");
         for (PageData page : indexManager.getAllPages()) {
             try {
@@ -150,7 +145,7 @@ public class Spider {
         Spider spider = new Spider(startUrl, maxPages, storageDir);
         spider.crawl();
 
-        for (int i = 1; i <= 5 && i <= maxPages; i++) {
+        for (int i = 1; i <= 5; i++) {
             spider.printPageHierarchy(i);
         }
     }

@@ -91,13 +91,6 @@ public class Indexer {
         if (!text.isEmpty()) {
             List<TermPosition> terms = tokenizeAndStemming(text);
 
-            /* Count unique terms for statistics
-            Map<String, Integer> uniqueTerms = new HashMap<>();
-            for (TermPosition tp : terms) {
-                uniqueTerms.put(tp.term, uniqueTerms.getOrDefault(tp.term, 0) + 1);
-            }
-             */
-
             // Add all terms to index
             for (TermPosition tp : terms) {
                 index.addEntry(tp.term, docId, tp.position);
