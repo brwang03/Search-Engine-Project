@@ -368,16 +368,20 @@ public class Retriever {
     private Map<String, Integer> getDocumentFrequency(List<String> terms) {
         Map<String, Integer> df = new HashMap<>();
         for (String term : terms) {
-            int count = 0;
+            Set<Integer> docs = new HashSet<>();
             try {
-                PostingList postings = (PostingList) bodyIndex.getHTree().get(term);
-                if (postings != null) {
-                    count = postings.size();
+                PostingList bodyPostings = (PostingList) bodyIndex.getHTree().get(term);
+                if (bodyPostings != null) {
+                    docs.addAll(bodyPostings.docIdsSnapshot());
+                }
+                PostingList titlePostings = (PostingList) titleIndex.getHTree().get(term);
+                if (titlePostings != null) {
+                    docs.addAll(titlePostings.docIdsSnapshot());
                 }
             } catch (IOException e) {
                 System.out.println(e.getMessage());
             }
-            df.put(term, count);
+            df.put(term, docs.size());
         }
         return df;
     }
