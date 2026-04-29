@@ -955,7 +955,7 @@
             const timeStr = new Date(item.timestamp).toLocaleTimeString();
             html += `<span class="history-chip" onclick="restoreHistory(${idx})" title="Searched at ${timeStr}">
                 ${escapeHtml(item.query)}
-                <span class="chip-delete" onclick="event.stopPropagation(); deleteHistoryItem(${idx})">X</span>
+                <span class="chip-delete" onclick="event.stopPropagation(); deleteHistoryItem(${idx})">x</span>
             </span>`;
         });
 
