@@ -7,6 +7,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -66,12 +67,17 @@ public class IndexManager {
             writer.println("URL: " + page.getUrl());
             writer.println("Title: " + page.getTitle());
             writer.println("Last-Modified: " + new Date(page.getLastModified()));
-            writer.println("Size: " + page.getSize());        // ★ 新增
+            writer.println("Size: " + page.getSize());
             writer.println("Parent-ID: " + page.getParentId());
             writer.println("Children-IDs: " + page.getChildrenIds());
             writer.println("\n--- Content ---\n");
             writer.println(page.getContent());
         }
+    }
+
+    // ★ 新增：获取所有已索引的页面
+    public Collection<PageData> getAllPages() {
+        return idToPageMap.values();
     }
 
     public List<Integer> getChildrenIds(int parentId) {

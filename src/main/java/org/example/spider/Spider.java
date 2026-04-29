@@ -110,6 +110,17 @@ public class Spider {
                 break;
             }
         }
+
+        // ★ 新增：爬取完成后重新保存所有页面，确保 Children-IDs 完整
+        System.out.println("\nRe-saving all pages with complete child information...");
+        for (PageData page : indexManager.getAllPages()) {
+            try {
+                indexManager.savePageContent(page);
+            } catch (IOException e) {
+                System.err.println("Error re-saving page " + page.getPageId() + ": " + e.getMessage());
+            }
+        }
+
         String storageDir = "src/main/resources";
         try {
             indexManager.exportLinkStructure("link_structure.txt");
