@@ -549,10 +549,12 @@ public class Retriever {
         return norm;
     }
 
-    private double calculateJaccardScore(Map<String, Double> docWeights, Map<String, Double> queryWeights) {
+    private double calculateJaccardScore(Map<String, Double> docWeights, Map<String, Double> queryWeights,
+                                         Double precomputedDocNorm) {
         // Jaccard (vector form): (D·Q) / (||D||^2 + ||Q||^2 - D·Q)
         double dot = calculateDotProduct(docWeights, queryWeights);
-        double docSq = calculateSquaredNorm(docWeights);
+        // Use precomputed global norm squared if available, otherwise compute sub-vector norm squared
+        double docSq = (precomputedDocNorm != null) ? (precomputedDocNorm * precomputedDocNorm) : calculateSquaredNorm(docWeights);
         double querySq = calculateSquaredNorm(queryWeights);
         double denominator = docSq + querySq - dot;
 
@@ -560,10 +562,12 @@ public class Retriever {
         return dot / denominator;
     }
 
-    private double calculateDiceScore(Map<String, Double> docWeights, Map<String, Double> queryWeights) {
+    private double calculateDiceScore(Map<String, Double> docWeights, Map<String, Double> queryWeights,
+                                      Double precomputedDocNorm) {
         // Dice (vector form): 2(D·Q) / (||D||^2 + ||Q||^2)
         double dot = calculateDotProduct(docWeights, queryWeights);
-        double docSq = calculateSquaredNorm(docWeights);
+        // Use precomputed global norm squared if available, otherwise compute sub-vector norm squared
+        double docSq = (precomputedDocNorm != null) ? (precomputedDocNorm * precomputedDocNorm) : calculateSquaredNorm(docWeights);
         double querySq = calculateSquaredNorm(queryWeights);
         double denominator = docSq + querySq;
 
@@ -579,9 +583,9 @@ public class Retriever {
                 double docNorm = (precomputedDocNorm != null) ? precomputedDocNorm : Math.sqrt(calculateSquaredNorm(docWeights));
                 return calculateCosineScore(docWeights, queryWeights, docNorm, calculateQueryNorm(queryWeights));
             case JACCARD:
-                return calculateJaccardScore(docWeights, queryWeights);
+                return calculateJaccardScore(docWeights, queryWeights, precomputedDocNorm);
             case DICE:
-                return calculateDiceScore(docWeights, queryWeights);
+                return calculateDiceScore(docWeights, queryWeights, precomputedDocNorm);
             default:
                 return 0.0;
         }
