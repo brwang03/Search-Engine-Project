@@ -21,8 +21,10 @@ public class Retriever {
     private final int totalDocuments;
     private static final double TITLE_BOOST = 3.0;
     private static final int MAX_RESULTS = 50;
+    private static final double TITLE_PHRASE_BOOST = 0.3;
+    private static final double BODY_PHRASE_BOOST = 0.15;
     private static final double SYNONYM_TERM_WEIGHT = 0.2;
-    private static final double SYNONYM_PHRASE_BOOST_MULTIPLIER = 0.3;
+    private static final double SYNONYM_PHRASE_BOOST_MULTIPLIER = 0.2;
 
     public enum SimilarityMetric {
         COSINE,
@@ -570,12 +572,12 @@ public class Retriever {
     }
 
     private double calculateSimilarity(Map<String, Double> docWeights, Map<String, Double> queryWeights,
-                                       SimilarityMetric metric) {
+                                       SimilarityMetric metric, Double precomputedDocNorm) {
         switch (metric) {
             case COSINE:
-                return calculateCosineScore(docWeights, queryWeights,
-                        Math.sqrt(calculateSquaredNorm(docWeights)),
-                        calculateQueryNorm(queryWeights));
+                // Use precomputed global norm if available, otherwise compute sub-vector norm
+                double docNorm = (precomputedDocNorm != null) ? precomputedDocNorm : Math.sqrt(calculateSquaredNorm(docWeights));
+                return calculateCosineScore(docWeights, queryWeights, docNorm, calculateQueryNorm(queryWeights));
             case JACCARD:
                 return calculateJaccardScore(docWeights, queryWeights);
             case DICE:
@@ -583,20 +585,6 @@ public class Retriever {
             default:
                 return 0.0;
         }
-    }
-
-    private Map<Integer, Map<String, Double>> buildDocumentVectors(List<String> terms, boolean isTitle) {
-        Map<Integer, Map<String, Double>> vectors = new HashMap<>();
-
-        for (String term : terms) {
-            Map<Integer, Double> perDoc = getDocumentTFWeights(term, isTitle);
-            for (Map.Entry<Integer, Double> entry : perDoc.entrySet()) {
-                vectors.computeIfAbsent(entry.getKey(), k -> new HashMap<>())
-                        .put(term, entry.getValue());
-            }
-        }
-
-        return vectors;
     }
 
     private String phraseKey(List<String> phraseTerms) {
@@ -649,28 +637,9 @@ public class Retriever {
         Map<String, Double> titleDocWeights = titleVectors.getOrDefault(docId, Collections.emptyMap());
         Map<String, Double> bodyDocWeights = bodyVectors.getOrDefault(docId, Collections.emptyMap());
 
-        double score;
-        if (metric == SimilarityMetric.COSINE) {
-            double queryNorm = calculateQueryNorm(queryWeights);
-            double titleScore = calculateCosineScore(
-                    titleDocWeights,
-                    queryWeights,
-                    titleDocNorms.getOrDefault(docId, 0.0),
-                    queryNorm
-            );
-            double bodyScore = calculateCosineScore(
-                    bodyDocWeights,
-                    queryWeights,
-                    bodyDocNorms.getOrDefault(docId, 0.0),
-                    queryNorm
-            );
-            // final score = cosine(query, body) + TITLE_BOOST * cosine(query, title)
-            score = bodyScore + TITLE_BOOST * titleScore;
-        } else {
-            double titleScore = calculateSimilarity(titleDocWeights, queryWeights, metric);
-            double bodyScore = calculateSimilarity(bodyDocWeights, queryWeights, metric);
-            score = bodyScore + TITLE_BOOST * titleScore;
-        }
+        double titleScore = calculateSimilarity(titleDocWeights, queryWeights, metric, titleDocNorms.get(docId));
+        double bodyScore = calculateSimilarity(bodyDocWeights, queryWeights, metric, bodyDocNorms.get(docId));
+        double score = bodyScore + TITLE_BOOST * titleScore;
 
         for (int i = 0; i < query.phrases.size(); i++) {
             List<String> phrase = query.phrases.get(i);
@@ -678,8 +647,8 @@ public class Retriever {
             boolean bodyMatch = checkPhraseMatch(docId, phrase, false);
 
             double phraseBoost = 0.0;
-            if (titleMatch) phraseBoost += 0.5;
-            if (bodyMatch) phraseBoost += 0.25;
+            if (titleMatch) phraseBoost += TITLE_PHRASE_BOOST;
+            if (bodyMatch) phraseBoost += BODY_PHRASE_BOOST;
 
             String key = phraseKey(phrase);
             if (synonymPhraseKeys.contains(key)) {
@@ -805,8 +774,8 @@ public class Retriever {
 
         Map<String, Integer> df = getDocumentFrequency(expandedTerms);
 
-        Map<Integer, Map<String, Double>> titleVectors = buildDocumentVectorsWithSynonymWeighting(expandedTerms, true, isSynonym);
-        Map<Integer, Map<String, Double>> bodyVectors = buildDocumentVectorsWithSynonymWeighting(expandedTerms, false, isSynonym);
+        Map<Integer, Map<String, Double>> titleVectors = buildDocumentVectors(expandedTerms, true);
+        Map<Integer, Map<String, Double>> bodyVectors = buildDocumentVectors(expandedTerms, false);
 
         Set<Integer> candidateDocs = new HashSet<>();
         candidateDocs.addAll(titleVectors.keySet());
@@ -849,20 +818,14 @@ public class Retriever {
         return results.subList(0, Math.min(MAX_RESULTS, results.size()));
     }
 
-    private Map<Integer, Map<String, Double>> buildDocumentVectorsWithSynonymWeighting(
-            List<String> terms, boolean isTitle, Map<String, Boolean> isSynonym) {
+    private Map<Integer, Map<String, Double>> buildDocumentVectors(List<String> terms, boolean isTitle) {
         Map<Integer, Map<String, Double>> vectors = new HashMap<>();
 
         for (String term : terms) {
             Map<Integer, Double> perDoc = getDocumentTFWeights(term, isTitle);
-            boolean isSyn = isSynonym.getOrDefault(term, false);
             for (Map.Entry<Integer, Double> entry : perDoc.entrySet()) {
                 Map<String, Double> docVector = vectors.computeIfAbsent(entry.getKey(), k -> new HashMap<>());
-                double weight = entry.getValue();
-                if (isSyn) {
-                    weight = weight * SYNONYM_TERM_WEIGHT;
-                }
-                docVector.put(term, weight);
+                docVector.put(term, entry.getValue());
             }
         }
 
